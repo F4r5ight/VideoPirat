@@ -9,7 +9,8 @@ from flask import Flask, request
 from urllib.parse import urlparse
 import yt_dlp
 import telegram
-from telegram import Bot, Update
+from telegram import Bot
+from telegram.ext import ApplicationBuilder
 
 # Настройка логирования
 logging.basicConfig(
@@ -38,22 +39,25 @@ SUPPORTED_PLATFORMS = {
     'facebook': r'https?://(www\.)?(facebook\.com|fb\.watch)/[^/]+(/videos/|/watch/\?v=)\d+',
 }
 
-# Инициализируем бота
+# Инициализируем бота (асинхронная версия для вебхуков)
 bot = Bot(token=BOT_TOKEN)
+
+# Инициализируем синхронное приложение для отправки сообщений
+application = ApplicationBuilder().token(BOT_TOKEN).build()
 
 
 def send_start_message(chat_id):
     """Отправляет приветственное сообщение"""
     try:
         logger.info(f"Отправка приветственного сообщения пользователю {chat_id}")
-        # Используем asyncio.run для выполнения асинхронного метода в синхронном контексте
-        asyncio.run(bot.send_message(
+        # Используем синхронный метод отправки сообщения
+        application.bot.send_message(
             chat_id=chat_id,
             text="👋 Привет! Я бот для скачивания видео из соцсетей.\n\n"
                  "Просто отправь мне ссылку на пост из Instagram, TikTok, Twitter, YouTube или Facebook, "
                  "и я извлеку видео для тебя.\n\n"
                  "Для получения справки используй команду /инфо"
-        ))
+        )
         logger.info(f"Приветственное сообщение успешно отправлено пользователю {chat_id}")
     except Exception as e:
         logger.error(f"Ошибка при отправке приветственного сообщения: {e}")
@@ -63,7 +67,7 @@ def send_info_message(chat_id):
     """Отправляет справочное сообщение"""
     try:
         logger.info(f"Отправка справочного сообщения пользователю {chat_id}")
-        asyncio.run(bot.send_message(
+        application.bot.send_message(
             chat_id=chat_id,
             text="📋 <b>Инструкция по использованию бота</b>\n\n"
                  "1. Скопируйте ссылку на пост с видео из поддерживаемой соцсети\n"
@@ -79,7 +83,7 @@ def send_info_message(chat_id):
                  "/старт - запустить бота\n"
                  "/инфо - показать эту справку",
             parse_mode="HTML"
-        ))
+        )
         logger.info(f"Справочное сообщение успешно отправлено пользователю {chat_id}")
     except Exception as e:
         logger.error(f"Ошибка при отправке справочного сообщения: {e}")
@@ -236,36 +240,36 @@ def download_and_send_video(url, platform, chat_id, status_message_id):
 
         if file_size > max_telegram_size:
             # Если файл слишком большой, пробуем сжать сильнее
-            asyncio.run(bot.edit_message_text(
+            application.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=status_message_id,
                 text="⏳ Видео слишком большое, применяю дополнительное сжатие..."
-            ))
+            )
 
             compressed_path = compress_video(video_path)
             if compressed_path:
                 video_path = compressed_path
             else:
-                asyncio.run(bot.edit_message_text(
+                application.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=status_message_id,
                     text="❌ Видео слишком большое для отправки в Telegram даже после сжатия (>50MB)"
-                ))
+                )
                 # Удаляем временные файлы
                 cleanup_video_files(video_path)
                 return
 
         # Отправляем видео в чат
         with open(video_path, 'rb') as video_file:
-            asyncio.run(bot.send_video(
+            application.bot.send_video(
                 chat_id=chat_id,
                 video=video_file,
                 caption=f"🎬 Видео из {platform.capitalize()}\n🔗 {url}",
                 supports_streaming=True
-            ))
+            )
 
         # Удаляем статусное сообщение
-        asyncio.run(bot.delete_message(chat_id=chat_id, message_id=status_message_id))
+        application.bot.delete_message(chat_id=chat_id, message_id=status_message_id)
 
         # Удаляем временные файлы
         cleanup_video_files(video_path)
@@ -285,14 +289,14 @@ def download_and_send_video(url, platform, chat_id, status_message_id):
             error_text = "❌ Для доступа к этому контенту требуется авторизация."
 
         try:
-            asyncio.run(bot.edit_message_text(
+            application.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=status_message_id,
                 text=f"{error_text}: {short_error}"
-            ))
+            )
         except Exception:
             # Если не удалось отредактировать сообщение, отправляем новое
-            asyncio.run(bot.send_message(chat_id=chat_id, text=f"{error_text}: {short_error}"))
+            application.bot.send_message(chat_id=chat_id, text=f"{error_text}: {short_error}")
 
         logger.error(f"Ошибка при обработке URL {url}: {e}")
 
@@ -353,10 +357,10 @@ def webhook():
             logger.info(f"Обнаружена ссылка на {platform} от {chat_id}: {url}")
 
             # Отправляем сообщение о начале обработки
-            status_message = asyncio.run(bot.send_message(
+            status_message = application.bot.send_message(
                 chat_id=chat_id,
                 text=f"⏳ Скачиваю видео из {platform.capitalize()}..."
-            ))
+            )
 
             # Запускаем обработку видео в отдельном потоке
             thread = threading.Thread(
@@ -369,10 +373,10 @@ def webhook():
             # Если сообщение не является командой и не содержит URL
             if not text.startswith('/'):
                 logger.info(f"Отправка информационного сообщения пользователю {chat_id}")
-                asyncio.run(bot.send_message(
+                application.bot.send_message(
                     chat_id=chat_id,
                     text="Пожалуйста, отправьте ссылку на видео из поддерживаемой соцсети. Для получения справки используйте команду /инфо"
-                ))
+                )
 
     except Exception as e:
         logger.error(f"Ошибка при обработке webhook: {e}")
