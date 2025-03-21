@@ -46,13 +46,14 @@ def send_start_message(chat_id):
     """Отправляет приветственное сообщение"""
     try:
         logger.info(f"Отправка приветственного сообщения пользователю {chat_id}")
-        bot.send_message(
+        # Используем asyncio.run для выполнения асинхронного метода в синхронном контексте
+        asyncio.run(bot.send_message(
             chat_id=chat_id,
             text="👋 Привет! Я бот для скачивания видео из соцсетей.\n\n"
                  "Просто отправь мне ссылку на пост из Instagram, TikTok, Twitter, YouTube или Facebook, "
                  "и я извлеку видео для тебя.\n\n"
                  "Для получения справки используй команду /инфо"
-        )
+        ))
         logger.info(f"Приветственное сообщение успешно отправлено пользователю {chat_id}")
     except Exception as e:
         logger.error(f"Ошибка при отправке приветственного сообщения: {e}")
@@ -62,7 +63,7 @@ def send_info_message(chat_id):
     """Отправляет справочное сообщение"""
     try:
         logger.info(f"Отправка справочного сообщения пользователю {chat_id}")
-        bot.send_message(
+        asyncio.run(bot.send_message(
             chat_id=chat_id,
             text="📋 <b>Инструкция по использованию бота</b>\n\n"
                  "1. Скопируйте ссылку на пост с видео из поддерживаемой соцсети\n"
@@ -78,7 +79,7 @@ def send_info_message(chat_id):
                  "/старт - запустить бота\n"
                  "/инфо - показать эту справку",
             parse_mode="HTML"
-        )
+        ))
         logger.info(f"Справочное сообщение успешно отправлено пользователю {chat_id}")
     except Exception as e:
         logger.error(f"Ошибка при отправке справочного сообщения: {e}")
@@ -235,36 +236,36 @@ def download_and_send_video(url, platform, chat_id, status_message_id):
 
         if file_size > max_telegram_size:
             # Если файл слишком большой, пробуем сжать сильнее
-            bot.edit_message_text(
+            asyncio.run(bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=status_message_id,
                 text="⏳ Видео слишком большое, применяю дополнительное сжатие..."
-            )
+            ))
 
             compressed_path = compress_video(video_path)
             if compressed_path:
                 video_path = compressed_path
             else:
-                bot.edit_message_text(
+                asyncio.run(bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=status_message_id,
                     text="❌ Видео слишком большое для отправки в Telegram даже после сжатия (>50MB)"
-                )
+                ))
                 # Удаляем временные файлы
                 cleanup_video_files(video_path)
                 return
 
         # Отправляем видео в чат
         with open(video_path, 'rb') as video_file:
-            bot.send_video(
+            asyncio.run(bot.send_video(
                 chat_id=chat_id,
                 video=video_file,
                 caption=f"🎬 Видео из {platform.capitalize()}\n🔗 {url}",
                 supports_streaming=True
-            )
+            ))
 
         # Удаляем статусное сообщение
-        bot.delete_message(chat_id=chat_id, message_id=status_message_id)
+        asyncio.run(bot.delete_message(chat_id=chat_id, message_id=status_message_id))
 
         # Удаляем временные файлы
         cleanup_video_files(video_path)
@@ -284,14 +285,14 @@ def download_and_send_video(url, platform, chat_id, status_message_id):
             error_text = "❌ Для доступа к этому контенту требуется авторизация."
 
         try:
-            bot.edit_message_text(
+            asyncio.run(bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=status_message_id,
                 text=f"{error_text}: {short_error}"
-            )
+            ))
         except Exception:
             # Если не удалось отредактировать сообщение, отправляем новое
-            bot.send_message(chat_id=chat_id, text=f"{error_text}: {short_error}")
+            asyncio.run(bot.send_message(chat_id=chat_id, text=f"{error_text}: {short_error}"))
 
         logger.error(f"Ошибка при обработке URL {url}: {e}")
 
@@ -352,7 +353,10 @@ def webhook():
             logger.info(f"Обнаружена ссылка на {platform} от {chat_id}: {url}")
 
             # Отправляем сообщение о начале обработки
-            status_message = bot.send_message(chat_id=chat_id, text=f"⏳ Скачиваю видео из {platform.capitalize()}...")
+            status_message = asyncio.run(bot.send_message(
+                chat_id=chat_id,
+                text=f"⏳ Скачиваю видео из {platform.capitalize()}..."
+            ))
 
             # Запускаем обработку видео в отдельном потоке
             thread = threading.Thread(
@@ -365,10 +369,10 @@ def webhook():
             # Если сообщение не является командой и не содержит URL
             if not text.startswith('/'):
                 logger.info(f"Отправка информационного сообщения пользователю {chat_id}")
-                bot.send_message(
+                asyncio.run(bot.send_message(
                     chat_id=chat_id,
                     text="Пожалуйста, отправьте ссылку на видео из поддерживаемой соцсети. Для получения справки используйте команду /инфо"
-                )
+                ))
 
     except Exception as e:
         logger.error(f"Ошибка при обработке webhook: {e}")
