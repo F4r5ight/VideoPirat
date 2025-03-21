@@ -89,16 +89,22 @@ async def handle_message(update: Update, context):
     else:
         await update.message.reply_text("❌ Пожалуйста, отправьте ссылку на видео.")
 
+
 @app.route('/' + BOT_TOKEN, methods=['POST'])
 def webhook():
     """Обрабатывает входящие обновления от Telegram"""
     try:
         update_data = request.get_json(force=True)
         update = Update.de_json(update_data, application.bot)
+
+        # Явно инициализируем приложение перед обработкой обновления
+        asyncio.run(application.initialize())
         asyncio.run(application.process_update(update))
+
     except Exception as e:
         logger.error(f"Ошибка при обработке webhook: {e}")
     return 'OK'
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
@@ -108,6 +114,3 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("info", info))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    # Запуск бота
-    application.run_polling()
