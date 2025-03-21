@@ -281,13 +281,17 @@ def download_and_send_video(url, platform, chat_id, status_message_id):
 async def set_webhook_async(webhook_url):
     """Асинхронно устанавливает вебхук"""
     try:
+        logger.info(f"Удаляем текущий вебхук...")
         await bot.delete_webhook()
+
+        logger.info(f"Устанавливаем новый вебхук на {webhook_url}")
         webhook_info = await bot.set_webhook(url=webhook_url)
-        logger.info(f"Вебхук успешно установлен на {webhook_url}")
+
+        logger.info(f"Вебхук успешно установлен: {webhook_info}")
         return f'Webhook настроен на {webhook_url}. Результат: {webhook_info}'
     except Exception as e:
         logger.error(f"Ошибка в асинхронной функции настройки вебхука: {e}")
-        return f'Ошибка при настройке webhook: {str(e)}'
+        raise  # Пробрасываем ошибку выше для обработки
 
 
 # Обработчик вебхука Telegram
@@ -350,12 +354,32 @@ def index():
 def set_webhook_route():
     """Синхронный маршрут для асинхронной настройки вебхука"""
     # Получаем URL приложения от Railway
-    app_url = os.environ.get('RAILWAY_STATIC_URL') or f"https://{os.environ.get('RAILWAY_PUBLIC_DOMAIN')}"
-    if not app_url:
-        # Резервный вариант, если переменные окружения не доступны
-        app_url = os.environ.get('APP_URL', 'https://your-app-url.railway.app')
+    # Railway использует разные переменные окружения в разных версиях
+    app_domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
+    webhook_base_url = None
 
-    webhook_url = f"{app_url}/{BOT_TOKEN}"
+    if app_domain:
+        # Проверяем, включает ли домен протокол
+        if not app_domain.startswith(('http://', 'https://')):
+            webhook_base_url = f"https://{app_domain}"
+        else:
+            webhook_base_url = app_domain
+    else:
+        # Другие возможные переменные окружения
+        static_url = os.environ.get('RAILWAY_STATIC_URL')
+        if static_url:
+            webhook_base_url = static_url
+        else:
+            # Резервный вариант
+            webhook_base_url = os.environ.get('APP_URL', 'https://your-app-url.railway.app')
+
+    # Удаляем возможные слеши в конце URL
+    if webhook_base_url.endswith('/'):
+        webhook_base_url = webhook_base_url[:-1]
+
+    webhook_url = f"{webhook_base_url}/{BOT_TOKEN}"
+
+    logger.info(f"Пытаемся установить вебхук на: {webhook_url}")
 
     try:
         # Запускаем асинхронную функцию в синхронном контексте
@@ -363,7 +387,17 @@ def set_webhook_route():
         return result
     except Exception as e:
         logger.error(f"Ошибка при настройке вебхука: {e}")
-        return f'Ошибка при настройке webhook: {str(e)}'
+        # Пробуем с альтернативным URL форматом
+        alt_webhook_base_url = f"https://{os.environ.get('RAILWAY_SERVICE_NAME', 'videopirat')}.up.railway.app"
+        alt_webhook_url = f"{alt_webhook_base_url}/{BOT_TOKEN}"
+        logger.info(f"Пробуем альтернативный URL: {alt_webhook_url}")
+
+        try:
+            result = asyncio.run(set_webhook_async(alt_webhook_url))
+            return result
+        except Exception as e2:
+            logger.error(f"Ошибка при настройке вебхука (альтернативный URL): {e2}")
+            return f'Не удалось настроить webhook: Попробовали {webhook_url} и {alt_webhook_url}'
 
 
 # Маршрут для удаления вебхука
@@ -382,15 +416,37 @@ if __name__ == '__main__':
     # Определяем порт из переменных окружения (для Railway)
     port = int(os.environ.get('PORT', 8080))
 
-    # Получаем URL приложения
-    app_url = os.environ.get('RAILWAY_STATIC_URL') or f"https://{os.environ.get('RAILWAY_PUBLIC_DOMAIN')}"
-    if not app_url:
-        app_url = os.environ.get('APP_URL', 'https://your-app.railway.app')
+    # Получаем URL приложения - это должно быть отдельно от настройки вебхука
+    try:
+        app_domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
+        webhook_base_url = None
 
-    # Автоматически настраиваем вебхук при запуске (асинхронно)
-    webhook_url = f"{app_url}/{BOT_TOKEN}"
-    logger.info(f"Настраиваем вебхук на {webhook_url}")
-    asyncio.run(set_webhook_async(webhook_url))
+        if app_domain:
+            if not app_domain.startswith(('http://', 'https://')):
+                webhook_base_url = f"https://{app_domain}"
+            else:
+                webhook_base_url = app_domain
+        else:
+            webhook_base_url = os.environ.get('RAILWAY_STATIC_URL')
+            if not webhook_base_url:
+                webhook_base_url = f"https://{os.environ.get('RAILWAY_SERVICE_NAME', 'videopirat')}.up.railway.app"
+
+        # Удаляем возможные слеши в конце URL
+        if webhook_base_url.endswith('/'):
+            webhook_base_url = webhook_base_url[:-1]
+
+        webhook_url = f"{webhook_base_url}/{BOT_TOKEN}"
+        logger.info(f"Настраиваем вебхук на {webhook_url}")
+
+        # Запускаем в отдельном потоке, чтобы не блокировать запуск сервера
+        threading.Thread(
+            target=lambda: asyncio.run(set_webhook_async(webhook_url)),
+            daemon=True
+        ).start()
+    except Exception as e:
+        logger.error(f"Ошибка при настройке вебхука при запуске: {e}")
+        logger.info(
+            "Продолжаем запуск сервера без настройки вебхука. Вы можете настроить вебхук вручную через /set_webhook")
 
     # Запускаем сервер
     app.run(host='0.0.0.0', port=port)
