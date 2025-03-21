@@ -1,15 +1,15 @@
 import os
 import re
 import time
+import asyncio
 import logging
 import threading
 import subprocess
 from flask import Flask, request
-import requests
 from urllib.parse import urlparse
 import yt_dlp
 import telegram
-from telegram import Update
+from telegram import Bot, Update
 
 # Настройка логирования
 logging.basicConfig(
@@ -39,7 +39,7 @@ SUPPORTED_PLATFORMS = {
 }
 
 # Инициализируем бота
-bot = telegram.Bot(token=BOT_TOKEN)
+bot = Bot(token=BOT_TOKEN)
 
 
 def send_start_message(chat_id):
@@ -277,6 +277,19 @@ def download_and_send_video(url, platform, chat_id, status_message_id):
         logger.error(f"Ошибка при обработке URL {url}: {e}")
 
 
+# Асинхронная функция для установки вебхука
+async def set_webhook_async(webhook_url):
+    """Асинхронно устанавливает вебхук"""
+    try:
+        await bot.delete_webhook()
+        webhook_info = await bot.set_webhook(url=webhook_url)
+        logger.info(f"Вебхук успешно установлен на {webhook_url}")
+        return f'Webhook настроен на {webhook_url}. Результат: {webhook_info}'
+    except Exception as e:
+        logger.error(f"Ошибка в асинхронной функции настройки вебхука: {e}")
+        return f'Ошибка при настройке webhook: {str(e)}'
+
+
 # Обработчик вебхука Telegram
 @app.route('/' + BOT_TOKEN, methods=['POST'])
 def webhook():
@@ -332,11 +345,12 @@ def index():
     return 'Бот работает!'
 
 
-# Настраиваем вебхук при запуске
+# Маршрут для настройки вебхука
 @app.route('/set_webhook')
-def set_webhook():
+def set_webhook_route():
+    """Синхронный маршрут для асинхронной настройки вебхука"""
     # Получаем URL приложения от Railway
-    app_url = os.environ.get('RAILWAY_STATIC_URL', f"https://{os.environ.get('RAILWAY_PUBLIC_DOMAIN')}")
+    app_url = os.environ.get('RAILWAY_STATIC_URL') or f"https://{os.environ.get('RAILWAY_PUBLIC_DOMAIN')}"
     if not app_url:
         # Резервный вариант, если переменные окружения не доступны
         app_url = os.environ.get('APP_URL', 'https://your-app-url.railway.app')
@@ -344,9 +358,9 @@ def set_webhook():
     webhook_url = f"{app_url}/{BOT_TOKEN}"
 
     try:
-        bot.delete_webhook()  # Сначала удаляем текущий вебхук
-        webhook_info = bot.set_webhook(url=webhook_url)
-        return f'Webhook настроен на {webhook_url}. Результат: {webhook_info}'
+        # Запускаем асинхронную функцию в синхронном контексте
+        result = asyncio.run(set_webhook_async(webhook_url))
+        return result
     except Exception as e:
         logger.error(f"Ошибка при настройке вебхука: {e}")
         return f'Ошибка при настройке webhook: {str(e)}'
@@ -355,10 +369,12 @@ def set_webhook():
 # Маршрут для удаления вебхука
 @app.route('/remove_webhook')
 def remove_webhook():
+    """Удаляет вебхук"""
     try:
-        bot.delete_webhook()
+        asyncio.run(bot.delete_webhook())
         return 'Webhook удален'
     except Exception as e:
+        logger.error(f"Ошибка при удалении вебхука: {e}")
         return f'Ошибка при удалении webhook: {e}'
 
 
@@ -366,8 +382,15 @@ if __name__ == '__main__':
     # Определяем порт из переменных окружения (для Railway)
     port = int(os.environ.get('PORT', 8080))
 
-    # Автоматически настраиваем вебхук при запуске
-    set_webhook()
+    # Получаем URL приложения
+    app_url = os.environ.get('RAILWAY_STATIC_URL') or f"https://{os.environ.get('RAILWAY_PUBLIC_DOMAIN')}"
+    if not app_url:
+        app_url = os.environ.get('APP_URL', 'https://your-app.railway.app')
+
+    # Автоматически настраиваем вебхук при запуске (асинхронно)
+    webhook_url = f"{app_url}/{BOT_TOKEN}"
+    logger.info(f"Настраиваем вебхук на {webhook_url}")
+    asyncio.run(set_webhook_async(webhook_url))
 
     # Запускаем сервер
     app.run(host='0.0.0.0', port=port)
