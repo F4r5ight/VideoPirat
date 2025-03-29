@@ -2,9 +2,14 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Устанавливаем необходимые пакеты, включая ffmpeg
+# Устанавливаем необходимые пакеты, включая ffmpeg и зависимости для instaloader
 RUN apt-get update && \
-    apt-get install -y ffmpeg && \
+    apt-get install -y ffmpeg \
+                       # Добавляем зависимости для instaloader
+                       gcc \
+                       libc-dev \
+                       libffi-dev \
+                       libssl-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 

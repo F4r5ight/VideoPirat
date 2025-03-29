@@ -11,6 +11,9 @@ import yt_dlp
 import requests
 from telegram import Bot
 from telegram.ext import ApplicationBuilder
+import glob
+import shutil
+import instaloader
 
 # Настройка логирования
 logging.basicConfig(
@@ -142,51 +145,112 @@ def cleanup_temp_files():
 
 
 def download_video(url, platform):
-    """Скачивает видео с использованием yt-dlp"""
+    """Скачивает видео с использованием разных инструментов в зависимости от платформы"""
     try:
-        # Преобразование URL для Instagram через прокси-сервис (если нужно)
-        if platform == 'instagram' and os.environ.get("USE_INSTAGRAM_PROXY", "0") == "1":
-            # Используем прокси для Instagram
-            url = f"https://www.ddinstagram.com/{url.split('instagram.com/')[1]}"
-            logger.info(f"Используем прокси для Instagram: {url}")
+        if platform == 'instagram':
+            # Для Instagram используем instaloader
+            import instaloader
+            import glob
+            import shutil
 
-        # Опции для yt-dlp с оптимизацией размера/качества
-        ydl_opts = {
-            'format': 'best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best',
-            'outtmpl': 'temp/%(title)s_%(id)s.%(ext)s',
-            'restrictfilenames': True,
-            'noplaylist': True,
-            'quiet': True,
-            'no_warnings': True,
-            'socket_timeout': 60,  # Увеличенный таймаут
-            # Добавляем хедеры для имитации браузера
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Referer': 'https://www.google.com/'
+            # Извлекаем shortcode из URL
+            match = re.search(r'instagram\.com/(?:p|reel)/([^/?]+)', url)
+            if not match:
+                raise ValueError("Не удалось извлечь ID поста из URL Instagram")
+
+            shortcode = match.group(1)
+            logger.info(f"Извлечен shortcode Instagram: {shortcode}")
+
+            # Инициализируем инстанс и выставляем пользовательский агент
+            L = instaloader.Instaloader(
+                download_videos=True,
+                download_video_thumbnails=False,
+                download_geotags=False,
+                download_comments=False,
+                save_metadata=False,
+                post_metadata_txt_pattern="",
+                dirname_pattern="temp",
+                user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1"
+            )
+
+            # Создаем временную директорию для скачивания
+            temp_dir = f"temp/{shortcode}"
+            os.makedirs(temp_dir, exist_ok=True)
+
+            logger.info(f"Скачиваем пост Instagram с ID: {shortcode}")
+
+            # Скачиваем пост
+            post = instaloader.Post.from_shortcode(L.context, shortcode)
+
+            # Путь к выходному файлу
+            video_path = f"temp/{shortcode}.mp4"
+
+            # Скачиваем видео
+            L.download_post(post, target=temp_dir)
+
+            # Переименовываем и перемещаем видео
+            downloaded_files = glob.glob(f"{temp_dir}/*.mp4")
+            if downloaded_files:
+                logger.info(f"Найден видеофайл: {downloaded_files[0]}")
+
+                # Если файл уже существует, удаляем его
+                if os.path.exists(video_path):
+                    os.remove(video_path)
+
+                # Перемещаем файл
+                shutil.move(downloaded_files[0], video_path)
+
+                # Удаляем временную директорию
+                shutil.rmtree(temp_dir)
+
+                logger.info(f"Видео Instagram успешно скачано: {video_path}")
+                return video_path
+            else:
+                error_msg = "Не удалось найти скачанное видео"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+        else:
+            # Для других платформ используем yt-dlp
+            logger.info(f"Используем yt-dlp для скачивания видео с {platform}")
+
+            # Опции для yt-dlp с оптимизацией размера/качества
+            ydl_opts = {
+                'format': 'best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best',
+                'outtmpl': 'temp/%(title)s_%(id)s.%(ext)s',
+                'restrictfilenames': True,
+                'noplaylist': True,
+                'quiet': True,
+                'no_warnings': True,
+                'socket_timeout': 60,  # Увеличенный таймаут
+                # Добавляем хедеры для имитации браузера
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Referer': 'https://www.google.com/'
+                }
             }
-        }
 
-        # Скачиваем видео
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            video_path = ydl.prepare_filename(info)
+            # Скачиваем видео
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                video_path = ydl.prepare_filename(info)
 
-            # Проверяем, что файл существует
-            if os.path.exists(video_path):
-                # Если файл не mp4, конвертируем его с помощью ffmpeg
-                if not video_path.endswith('.mp4'):
-                    new_path = f"{os.path.splitext(video_path)[0]}.mp4"
-                    cmd = f"ffmpeg -i \"{video_path}\" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k \"{new_path}\""
-                    subprocess.call(cmd, shell=True)
+                # Проверяем, что файл существует
+                if os.path.exists(video_path):
+                    # Если файл не mp4, конвертируем его с помощью ffmpeg
+                    if not video_path.endswith('.mp4'):
+                        new_path = f"{os.path.splitext(video_path)[0]}.mp4"
+                        cmd = f"ffmpeg -i \"{video_path}\" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k \"{new_path}\""
+                        subprocess.call(cmd, shell=True)
 
-                    if os.path.exists(new_path):
-                        if os.path.exists(video_path):
-                            os.remove(video_path)
-                        video_path = new_path
+                        if os.path.exists(new_path):
+                            if os.path.exists(video_path):
+                                os.remove(video_path)
+                            video_path = new_path
 
-            return video_path
+                logger.info(f"Видео успешно скачано: {video_path}")
+                return video_path
     except Exception as e:
         logger.error(f"Ошибка при скачивании видео: {e}")
         raise
@@ -279,7 +343,7 @@ def download_and_send_video(url, platform, chat_id, status_message_id):
             }
             data = {
                 'chat_id': chat_id,
-                'caption': f"🎬 Видео из {platform.capitalize()}\n🔗 {url}",
+                'caption': f"🎬 Видео из {platform.capitalize()}\n",
                 'supports_streaming': 'true'
             }
 
@@ -374,7 +438,7 @@ def download_and_send_video_no_status(url, platform, chat_id):
             }
             data = {
                 'chat_id': chat_id,
-                'caption': f"🎬 Видео из {platform.capitalize()}\n🔗 {url}",
+                'caption': f"🎬 Видео из {platform.capitalize()}\n",
                 'supports_streaming': 'true'
             }
 
