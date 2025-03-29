@@ -1,6 +1,7 @@
 python-telegram-bot>=20.0
-yt-dlp
 flask
 python-dotenv
 requests
-instaloader>=4.9.5
+browser-cookie3
+yt-dlp>=2023.3.4
+instaloader>=4.10

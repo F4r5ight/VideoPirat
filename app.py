@@ -40,6 +40,7 @@ SUPPORTED_PLATFORMS = {
     'twitter': r'https?://(www\.)?(twitter\.com|x\.com)/[^/]+/status/\d+',
     'youtube': r'https?://(www\.)?(youtube\.com/watch\?v=|youtu\.be/)[^&\s]+',
     'facebook': r'https?://(www\.)?(facebook\.com|fb\.watch)/[^/]+(/videos/|/watch/\?v=)\d+',
+    'linkedin': r'https?://(www\.)?(linkedin\.com)/posts/[^/]+(?:-[^/]+)*-(?:activity-|ugcPost-)\d+',
 }
 
 # Инициализируем бота (асинхронная версия для вебхуков)
@@ -58,7 +59,7 @@ def send_start_message(chat_id):
         payload = {
             "chat_id": chat_id,
             "text": "👋 Привет! Я бот для скачивания видео из соцсетей.\n\n"
-                    "Просто отправь мне ссылку на пост из Instagram, TikTok, Twitter, YouTube или Facebook, "
+                    "Просто отправь мне ссылку на пост из Instagram, TikTok, Twitter, YouTube, Facebook или LinkedIn, "
                     "и я извлеку видео для тебя.\n\n"
                     "Для получения справки используй команду /инфо"
         }
@@ -88,7 +89,8 @@ def send_info_message(chat_id):
                  "• TikTok\n"
                  "• Twitter/X\n"
                  "• YouTube\n"
-                 "• Facebook\n\n"
+                 "• Facebook\n"
+                 "• LinkedIn\n\n"
                  "<b>Команды бота:</b>\n"
                  "/старт - запустить бота\n"
                  "/инфо - показать эту справку",
@@ -129,6 +131,8 @@ def get_platform(url):
         return 'youtube'
     elif 'facebook' in domain or 'fb.watch' in domain:
         return 'facebook'
+    elif 'linkedin' in domain:
+        return 'linkedin'
     return 'unknown'
 
 
@@ -228,7 +232,7 @@ def download_video(url, platform):
             # Для других платформ используем yt-dlp
             logger.info(f"Используем yt-dlp для скачивания видео с {platform}")
 
-            # Опции для yt-dlp с оптимизацией размера/качества
+            # Базовые опции для yt-dlp
             ydl_opts = {
                 'format': 'best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best',
                 'outtmpl': 'temp/%(title)s_%(id)s.%(ext)s',
@@ -237,14 +241,52 @@ def download_video(url, platform):
                 'quiet': True,
                 'no_warnings': True,
                 'socket_timeout': 60,  # Увеличенный таймаут
-                # Добавляем хедеры для имитации браузера
-                'http_headers': {
+            }
+
+            # Настраиваем http_headers в зависимости от платформы
+            if platform == 'linkedin':
+                # Оптимизированные настройки для LinkedIn
+                ydl_opts['http_headers'] = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Referer': 'https://www.linkedin.com/',
+                    'sec-ch-ua': '"Chromium";v="96", "Google Chrome";v="96"',
+                    'sec-ch-ua-mobile': '?0',
+                    'sec-ch-ua-platform': '"Windows"',
+                    'sec-fetch-dest': 'document',
+                    'sec-fetch-mode': 'navigate',
+                    'sec-fetch-site': 'same-origin',
+                    'sec-fetch-user': '?1',
+                    'upgrade-insecure-requests': '1'
+                }
+                # Для LinkedIn увеличиваем количество повторных попыток
+                ydl_opts['retries'] = 10
+                ydl_opts['fragment_retries'] = 10
+                # Увеличиваем таймаут для LinkedIn
+                ydl_opts['socket_timeout'] = 120
+            elif platform == 'twitter' or platform == 'x':
+                ydl_opts['http_headers'] = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Referer': 'https://twitter.com/'
+                }
+            elif platform == 'facebook':
+                ydl_opts['http_headers'] = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Referer': 'https://www.facebook.com/'
+                }
+            else:
+                # Стандартные заголовки для других платформ
+                ydl_opts['http_headers'] = {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                     'Accept-Language': 'en-US,en;q=0.9',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                     'Referer': 'https://www.google.com/'
                 }
-            }
 
             # Скачиваем видео
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -539,7 +581,7 @@ def webhook():
                 json={
                     "chat_id": chat_id,
                     "text": "👋 Привет! Я бот для скачивания видео из соцсетей.\n\n"
-                            "Просто отправь мне ссылку на пост из Instagram, TikTok, Twitter, YouTube или Facebook, "
+                            "Просто отправь мне ссылку на пост из Instagram, TikTok, Twitter, YouTube или Facebook или LinkedIn, "
                             "и я извлеку видео для тебя.\n\n"
                             "Для получения справки используй команду /инфо"
                 }
@@ -562,7 +604,8 @@ def webhook():
                             "• TikTok\n"
                             "• Twitter/X\n"
                             "• YouTube\n"
-                            "• Facebook\n\n"
+                            "• Facebook\n"
+                            "• LinkedIn\n\n"
                             "<b>Команды бота:</b>\n"
                             "/старт - запустить бота\n"
                             "/инфо - показать эту справку",
