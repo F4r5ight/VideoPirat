@@ -188,20 +188,35 @@ def download_video(url, platform):
             # Скачиваем видео
             L.download_post(post, target=temp_dir)
 
-            # Переименовываем и перемещаем видео
+            # Проверяем все .mp4 файлы в директории temp
+            # Instaloader может сохранить файл с датой в имени
             downloaded_files = glob.glob(f"{temp_dir}/*.mp4")
+
+            # Если не найдено в директории по shortcode, ищем в корневой директории temp
+            if not downloaded_files:
+                downloaded_files = glob.glob(f"temp/*.mp4")
+                # Сортируем по времени создания (самый новый вверху)
+                downloaded_files.sort(key=os.path.getmtime, reverse=True)
+
             if downloaded_files:
-                logger.info(f"Найден видеофайл: {downloaded_files[0]}")
+                latest_file = downloaded_files[0]
+                logger.info(f"Найден видеофайл: {latest_file}")
 
                 # Если файл уже существует, удаляем его
-                if os.path.exists(video_path):
+                if os.path.exists(video_path) and video_path != latest_file:
                     os.remove(video_path)
 
-                # Перемещаем файл
-                shutil.move(downloaded_files[0], video_path)
+                # Если файл уже находится в нужном месте с нужным именем, просто используем его
+                if latest_file == video_path:
+                    logger.info(f"Видео Instagram уже в нужном месте: {video_path}")
+                else:
+                    # Копируем файл (не перемещаем, чтобы не нарушить работу instaloader)
+                    shutil.copy2(latest_file, video_path)
+                    logger.info(f"Скопировано видео из {latest_file} в {video_path}")
 
-                # Удаляем временную директорию
-                shutil.rmtree(temp_dir)
+                # Удаляем временную директорию, если она существует и не является корневой temp
+                if os.path.exists(temp_dir) and temp_dir != "temp":
+                    shutil.rmtree(temp_dir)
 
                 logger.info(f"Видео Instagram успешно скачано: {video_path}")
                 return video_path
