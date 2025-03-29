@@ -277,14 +277,35 @@ def download_video(url, platform):
 def compress_video(video_path):
     compressed_path = f"{os.path.splitext(video_path)[0]}_compressed.mp4"
 
-    cmd = f"ffmpeg -i \"{video_path}\" -c:v libx264 -crf 28 -preset faster -vf scale=-2:480 -r 24 -c:a aac -b:a 96k \"{compressed_path}\""
+    probe_cmd = f"ffprobe -v error -select_streams v:0 -show_entries stream=width,height,display_aspect_ratio -of csv=s=,:p=0 \"{video_path}\""
+    probe_result = subprocess.check_output(probe_cmd, shell=True, text=True).strip().split(',')
+
+    width, height = int(probe_result[0]), int(probe_result[1])
+    aspect_ratio = float(width) / float(height)
+
+    target_height = min(480, height)
+    target_width = int(target_height * aspect_ratio)
+    target_width = target_width - (target_width % 2)
+
+    cmd = f'ffmpeg -i \"{video_path}\" -c:v libx264 -crf 28 -preset faster ' \
+          f'-vf "scale={target_width}:{target_height}" ' \
+          f'-r 24 -c:a aac -b:a 96k -aspect {aspect_ratio} \"{compressed_path}\"'
+
     subprocess.call(cmd, shell=True)
 
     if os.path.exists(compressed_path) and os.path.getsize(compressed_path) <= 50 * 1024 * 1024:
         return compressed_path
 
     more_compressed_path = f"{os.path.splitext(video_path)[0]}_more_compressed.mp4"
-    cmd = f"ffmpeg -i \"{video_path}\" -c:v libx264 -crf 32 -preset faster -vf scale=-2:360 -r 20 -c:a aac -b:a 64k \"{more_compressed_path}\""
+
+    smaller_height = min(360, height)
+    smaller_width = int(smaller_height * aspect_ratio)
+    smaller_width = smaller_width - (smaller_width % 2)
+
+    cmd = f'ffmpeg -i \"{video_path}\" -c:v libx264 -crf 32 -preset faster ' \
+          f'-vf "scale={smaller_width}:{smaller_height}" ' \
+          f'-r 20 -c:a aac -b:a 64k -aspect {aspect_ratio} \"{more_compressed_path}\"'
+
     subprocess.call(cmd, shell=True)
 
     if os.path.exists(more_compressed_path) and os.path.getsize(more_compressed_path) <= 50 * 1024 * 1024:
