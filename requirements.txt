@@ -3,3 +3,4 @@ yt-dlp
 flask
 python-dotenv
 requests
+instaloader>=4.9.5
