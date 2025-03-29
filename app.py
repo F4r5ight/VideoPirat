@@ -12,6 +12,9 @@ import yt_dlp
 import requests
 from telegram import Bot
 from telegram.ext import ApplicationBuilder
+import instaloader
+import glob
+import shutil
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -136,11 +139,7 @@ def cleanup_temp_files():
 def download_video(url, platform):
     try:
         if platform == 'instagram':
-            import instaloader
-            import glob
-            import shutil
-            import time
-            import random
+
 
             user_agents = [
                 "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1",
@@ -201,7 +200,7 @@ def download_video(url, platform):
                         if attempt < max_retries - 1:
                             logger.warning(f"Попытка {attempt + 1}/{max_retries} не удалась: {e}")
                             logger.info(f"Ожидание {retry_delay} секунд перед следующей попыткой...")
-                            time.sleep(retry_delay)
+                            time_module.sleep(retry_delay)
                             retry_delay *= 2
                         else:
                             logger.error(f"Все попытки скачать через instaloader не удались: {e}")
