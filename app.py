@@ -8,7 +8,7 @@ import subprocess
 from flask import Flask, request
 from urllib.parse import urlparse
 import yt_dlp
-import telegram
+import requests
 from telegram import Bot
 from telegram.ext import ApplicationBuilder
 
@@ -50,15 +50,22 @@ def send_start_message(chat_id):
     """Отправляет приветственное сообщение"""
     try:
         logger.info(f"Отправка приветственного сообщения пользователю {chat_id}")
-        # Используем bot вместо application.bot
-        bot.send_message(
-            chat_id=chat_id,
-            text="👋 Привет! Я бот для скачивания видео из соцсетей.\n\n"
-                 "Просто отправь мне ссылку на пост из Instagram, TikTok, Twitter, YouTube или Facebook, "
-                 "и я извлеку видео для тебя.\n\n"
-                 "Для получения справки используй команду /инфо"
-        )
-        logger.info(f"Приветственное сообщение успешно отправлено пользователю {chat_id}")
+
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": "👋 Привет! Я бот для скачивания видео из соцсетей.\n\n"
+                    "Просто отправь мне ссылку на пост из Instagram, TikTok, Twitter, YouTube или Facebook, "
+                    "и я извлеку видео для тебя.\n\n"
+                    "Для получения справки используй команду /инфо"
+        }
+        response = requests.post(url, json=payload)
+
+        if response.status_code == 200:
+            logger.info(f"Приветственное сообщение успешно отправлено пользователю {chat_id}")
+        else:
+            logger.error(f"Ошибка при отправке сообщения: {response.text}")
+
     except Exception as e:
         logger.error(f"Ошибка при отправке приветственного сообщения: {e}")
 
