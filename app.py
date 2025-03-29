@@ -1,6 +1,7 @@
 import os
 import re
-import time
+import time as time_module
+import random
 import asyncio
 import logging
 import threading
@@ -11,9 +12,6 @@ import yt_dlp
 import requests
 from telegram import Bot
 from telegram.ext import ApplicationBuilder
-import glob
-import shutil
-import instaloader
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -128,7 +126,7 @@ def cleanup_temp_files():
     try:
         for file in os.listdir('temp'):
             file_path = os.path.join('temp', file)
-            if os.path.isfile(file_path) and (time.time() - os.path.getmtime(file_path)) > 3600:  # Старше 1 часа
+            if os.path.isfile(file_path) and (time_module.time() - os.path.getmtime(file_path)) > 3600:  # Старше 1 часа
                 os.remove(file_path)
                 logger.info(f"Удален старый временный файл: {file_path}")
     except Exception as e:
@@ -141,6 +139,16 @@ def download_video(url, platform):
             import instaloader
             import glob
             import shutil
+            import time
+            import random
+
+            user_agents = [
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1",
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram",
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 15_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+                "Mozilla/5.0 (Android 12; Mobile; rv:98.0) Gecko/98.0 Firefox/98.0",
+                "Instagram 219.0.0.12.117 Android"
+            ]
 
             match = re.search(r'instagram\.com/(?:p|reel)/([^/?]+)', url)
             if not match:
@@ -149,56 +157,135 @@ def download_video(url, platform):
             shortcode = match.group(1)
             logger.info(f"Извлечен shortcode Instagram: {shortcode}")
 
-            L = instaloader.Instaloader(
-                download_videos=True,
-                download_video_thumbnails=False,
-                download_geotags=False,
-                download_comments=False,
-                save_metadata=False,
-                post_metadata_txt_pattern="",
-                dirname_pattern="temp",
-                user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1"
-            )
+            def try_instaloader():
+                user_agent = random.choice(user_agents)
 
-            temp_dir = f"temp/{shortcode}"
-            os.makedirs(temp_dir, exist_ok=True)
+                L = instaloader.Instaloader(
+                    download_videos=True,
+                    download_video_thumbnails=False,
+                    download_geotags=False,
+                    download_comments=False,
+                    save_metadata=False,
+                    post_metadata_txt_pattern="",
+                    dirname_pattern="temp",
+                    user_agent=user_agent
+                )
 
-            logger.info(f"Скачиваем пост Instagram с ID: {shortcode}")
+                instagram_username = os.environ.get("INSTAGRAM_USERNAME", "")
+                instagram_password = os.environ.get("INSTAGRAM_PASSWORD", "")
 
-            post = instaloader.Post.from_shortcode(L.context, shortcode)
+                if instagram_username and instagram_password:
+                    try:
+                        logger.info(f"Попытка авторизации в Instagram под пользователем {instagram_username}")
+                        L.login(instagram_username, instagram_password)
+                        logger.info("Авторизация в Instagram успешна")
+                    except Exception as e:
+                        logger.warning(f"Не удалось авторизоваться в Instagram: {e}")
 
-            video_path = f"temp/{shortcode}.mp4"
+                temp_dir = f"temp/{shortcode}"
+                os.makedirs(temp_dir, exist_ok=True)
 
-            L.download_post(post, target=temp_dir)
+                logger.info(f"Скачиваем пост Instagram с ID: {shortcode}")
 
-            downloaded_files = glob.glob(f"{temp_dir}/*.mp4")
+                max_retries = 3
+                retry_delay = 5
+                success = False
 
-            if not downloaded_files:
-                downloaded_files = glob.glob(f"temp/*.mp4")
-                downloaded_files.sort(key=os.path.getmtime, reverse=True)
+                for attempt in range(max_retries):
+                    try:
+                        post = instaloader.Post.from_shortcode(L.context, shortcode)
+                        L.download_post(post, target=temp_dir)
+                        success = True
+                        break
+                    except Exception as e:
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Попытка {attempt + 1}/{max_retries} не удалась: {e}")
+                            logger.info(f"Ожидание {retry_delay} секунд перед следующей попыткой...")
+                            time.sleep(retry_delay)
+                            retry_delay *= 2
+                        else:
+                            logger.error(f"Все попытки скачать через instaloader не удались: {e}")
+                            return None
 
-            if downloaded_files:
-                latest_file = downloaded_files[0]
-                logger.info(f"Найден видеофайл: {latest_file}")
+                if not success:
+                    return None
 
-                if os.path.exists(video_path) and video_path != latest_file:
-                    os.remove(video_path)
+                video_path = f"temp/{shortcode}.mp4"
 
-                if latest_file == video_path:
-                    logger.info(f"Видео Instagram уже в нужном месте: {video_path}")
+                downloaded_files = glob.glob(f"{temp_dir}/*.mp4")
+
+                if not downloaded_files:
+                    downloaded_files = glob.glob(f"temp/*.mp4")
+                    downloaded_files.sort(key=os.path.getmtime, reverse=True)
+
+                if downloaded_files:
+                    latest_file = downloaded_files[0]
+                    logger.info(f"Найден видеофайл: {latest_file}")
+
+                    if os.path.exists(video_path) and video_path != latest_file:
+                        os.remove(video_path)
+
+                    if latest_file == video_path:
+                        logger.info(f"Видео Instagram уже в нужном месте: {video_path}")
+                    else:
+                        shutil.copy2(latest_file, video_path)
+                        logger.info(f"Скопировано видео из {latest_file} в {video_path}")
+
+                    if os.path.exists(temp_dir) and temp_dir != "temp":
+                        shutil.rmtree(temp_dir)
+
+                    logger.info(f"Видео Instagram успешно скачано через instaloader: {video_path}")
+                    return video_path
                 else:
-                    shutil.copy2(latest_file, video_path)
-                    logger.info(f"Скопировано видео из {latest_file} в {video_path}")
+                    logger.warning("Не удалось найти скачанное видео через instaloader")
+                    return None
 
-                if os.path.exists(temp_dir) and temp_dir != "temp":
-                    shutil.rmtree(temp_dir)
+            video_path = try_instaloader()
 
-                logger.info(f"Видео Instagram успешно скачано: {video_path}")
-                return video_path
-            else:
-                error_msg = "Не удалось найти скачанное видео"
-                logger.error(error_msg)
-                raise ValueError(error_msg)
+            if not video_path:
+                logger.info("Попытка скачать через yt-dlp в качестве запасного метода")
+                try:
+                    ydl_opts = {
+                        'format': 'best[ext=mp4]/best',
+                        'outtmpl': f'temp/{shortcode}.%(ext)s',
+                        'quiet': True,
+                        'no_warnings': True,
+                        'http_headers': {
+                            'User-Agent': random.choice(user_agents),
+                            'Accept-Language': 'en-US,en;q=0.9',
+                            'Accept': '*/*',
+                            'Referer': 'https://www.instagram.com/'
+                        }
+                    }
+
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download([url])
+
+                    for ext in ['mp4', 'mkv', 'webm']:
+                        video_path = f'temp/{shortcode}.{ext}'
+                        if os.path.exists(video_path):
+                            logger.info(f"Видео Instagram успешно скачано через yt-dlp: {video_path}")
+
+                            if not video_path.endswith('.mp4'):
+                                new_path = f"temp/{shortcode}.mp4"
+                                cmd = f"ffmpeg -i \"{video_path}\" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k \"{new_path}\""
+                                subprocess.call(cmd, shell=True)
+
+                                if os.path.exists(new_path):
+                                    if os.path.exists(video_path):
+                                        os.remove(video_path)
+                                    video_path = new_path
+
+                            return video_path
+
+                    raise ValueError("Не удалось найти скачанное видео через yt-dlp")
+
+                except Exception as ytdl_err:
+                    logger.error(f"Не удалось скачать через yt-dlp: {ytdl_err}")
+                    raise ValueError(f"Не удалось скачать видео с Instagram ни одним из методов")
+
+            return video_path
+
         else:
             logger.info(f"Используем yt-dlp для скачивания видео с {platform}")
 
@@ -209,7 +296,7 @@ def download_video(url, platform):
                 'noplaylist': True,
                 'quiet': True,
                 'no_warnings': True,
-                'socket_timeout': 60,  # Увеличенный таймаут
+                'socket_timeout': 60,
             }
 
             if platform == 'linkedin':
@@ -252,23 +339,41 @@ def download_video(url, platform):
                     'Referer': 'https://www.google.com/'
                 }
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                video_path = ydl.prepare_filename(info)
+            max_retries = 3
+            retry_delay = 3
 
-                if os.path.exists(video_path):
-                    if not video_path.endswith('.mp4'):
-                        new_path = f"{os.path.splitext(video_path)[0]}.mp4"
-                        cmd = f"ffmpeg -i \"{video_path}\" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k \"{new_path}\""
-                        subprocess.call(cmd, shell=True)
+            for attempt in range(max_retries):
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                        video_path = ydl.prepare_filename(info)
 
-                        if os.path.exists(new_path):
-                            if os.path.exists(video_path):
-                                os.remove(video_path)
-                            video_path = new_path
+                        if os.path.exists(video_path):
+                            if not video_path.endswith('.mp4'):
+                                new_path = f"{os.path.splitext(video_path)[0]}.mp4"
+                                cmd = f"ffmpeg -i \"{video_path}\" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k \"{new_path}\""
+                                subprocess.call(cmd, shell=True)
 
-                logger.info(f"Видео успешно скачано: {video_path}")
-                return video_path
+                                if os.path.exists(new_path):
+                                    if os.path.exists(video_path):
+                                        os.remove(video_path)
+                                    video_path = new_path
+
+                            logger.info(f"Видео успешно скачано: {video_path}")
+                            return video_path
+
+                    raise ValueError("Не удалось найти скачанное видео")
+
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Попытка {attempt + 1}/{max_retries} не удалась: {e}")
+                        logger.info(f"Ожидание {retry_delay} секунд перед следующей попыткой...")
+                        time_module.sleep(retry_delay)
+                        retry_delay *= 2
+                    else:
+                        logger.error(f"Все попытки скачать через yt-dlp не удались: {e}")
+                        raise
+
     except Exception as e:
         logger.error(f"Ошибка при скачивании видео: {e}")
         raise
@@ -277,42 +382,89 @@ def download_video(url, platform):
 def compress_video(video_path):
     compressed_path = f"{os.path.splitext(video_path)[0]}_compressed.mp4"
 
-    probe_cmd = f"ffprobe -v error -select_streams v:0 -show_entries stream=width,height,display_aspect_ratio -of csv=s=,:p=0 \"{video_path}\""
-    probe_result = subprocess.check_output(probe_cmd, shell=True, text=True).strip().split(',')
+    try:
+        probe_cmd = f"ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=,:p=0 \"{video_path}\""
+        probe_result = subprocess.check_output(probe_cmd, shell=True, text=True).strip().split(',')
 
-    width, height = int(probe_result[0]), int(probe_result[1])
-    aspect_ratio = float(width) / float(height)
+        if len(probe_result) >= 2:
+            width, height = int(probe_result[0]), int(probe_result[1])
+            aspect_ratio = float(width) / float(height)
 
-    target_height = min(480, height)
-    target_width = int(target_height * aspect_ratio)
-    target_width = target_width - (target_width % 2)
+            logger.info(f"Оригинальное видео: {width}x{height}, соотношение сторон: {aspect_ratio:.2f}")
 
-    cmd = f'ffmpeg -i \"{video_path}\" -c:v libx264 -crf 28 -preset faster ' \
-          f'-vf "scale={target_width}:{target_height}" ' \
-          f'-r 24 -c:a aac -b:a 96k -aspect {aspect_ratio} \"{compressed_path}\"'
+            target_height = min(480, height)
+            target_width = int(target_height * aspect_ratio)
+            target_width = target_width - (target_width % 2)
 
-    subprocess.call(cmd, shell=True)
+            logger.info(f"Сжимаем видео до {target_width}x{target_height}")
+
+            cmd = f'ffmpeg -i \"{video_path}\" -c:v libx264 -crf 28 -preset faster ' \
+                  f'-vf "scale={target_width}:{target_height}" ' \
+                  f'-r 24 -c:a aac -b:a 96k -aspect {aspect_ratio:.6f} \"{compressed_path}\"'
+
+            subprocess.call(cmd, shell=True)
+        else:
+            logger.warning("Не удалось определить размеры видео, использую стандартное сжатие")
+            cmd = f'ffmpeg -i \"{video_path}\" -c:v libx264 -crf 28 -preset faster -vf "scale=-2:480" -r 24 -c:a aac -b:a 96k \"{compressed_path}\"'
+            subprocess.call(cmd, shell=True)
+    except Exception as e:
+        logger.error(f"Ошибка при анализе видео: {e}")
+        cmd = f'ffmpeg -i \"{video_path}\" -c:v libx264 -crf 28 -preset faster -vf "scale=-2:480" -r 24 -c:a aac -b:a 96k \"{compressed_path}\"'
+        subprocess.call(cmd, shell=True)
 
     if os.path.exists(compressed_path) and os.path.getsize(compressed_path) <= 50 * 1024 * 1024:
+        logger.info(f"Видео успешно сжато: {compressed_path}")
         return compressed_path
 
     more_compressed_path = f"{os.path.splitext(video_path)[0]}_more_compressed.mp4"
 
-    smaller_height = min(360, height)
-    smaller_width = int(smaller_height * aspect_ratio)
-    smaller_width = smaller_width - (smaller_width % 2)
+    try:
+        probe_cmd = f"ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=,:p=0 \"{video_path}\""
+        probe_result = subprocess.check_output(probe_cmd, shell=True, text=True).strip().split(',')
 
-    cmd = f'ffmpeg -i \"{video_path}\" -c:v libx264 -crf 32 -preset faster ' \
-          f'-vf "scale={smaller_width}:{smaller_height}" ' \
-          f'-r 20 -c:a aac -b:a 64k -aspect {aspect_ratio} \"{more_compressed_path}\"'
+        if len(probe_result) >= 2:
+            width, height = int(probe_result[0]), int(probe_result[1])
+            aspect_ratio = float(width) / float(height)
 
-    subprocess.call(cmd, shell=True)
+            smaller_height = min(360, height)
+            smaller_width = int(smaller_height * aspect_ratio)
+            smaller_width = smaller_width - (smaller_width % 2)
+
+            logger.info(f"Применяем дополнительное сжатие до {smaller_width}x{smaller_height}")
+
+            cmd = f'ffmpeg -i \"{video_path}\" -c:v libx264 -crf 32 -preset faster ' \
+                  f'-vf "scale={smaller_width}:{smaller_height}" ' \
+                  f'-r 20 -c:a aac -b:a 64k -aspect {aspect_ratio:.6f} \"{more_compressed_path}\"'
+
+            subprocess.call(cmd, shell=True)
+        else:
+            cmd = f'ffmpeg -i \"{video_path}\" -c:v libx264 -crf 32 -preset faster -vf "scale=-2:360" -r 20 -c:a aac -b:a 64k \"{more_compressed_path}\"'
+            subprocess.call(cmd, shell=True)
+    except Exception as e:
+        logger.error(f"Ошибка при дополнительном сжатии: {e}")
+        cmd = f'ffmpeg -i \"{video_path}\" -c:v libx264 -crf 32 -preset faster -vf "scale=-2:360" -r 20 -c:a aac -b:a 64k \"{more_compressed_path}\"'
+        subprocess.call(cmd, shell=True)
 
     if os.path.exists(more_compressed_path) and os.path.getsize(more_compressed_path) <= 50 * 1024 * 1024:
         if os.path.exists(compressed_path):
             os.remove(compressed_path)
+        logger.info(f"Видео успешно сжато с дополнительной компрессией: {more_compressed_path}")
         return more_compressed_path
 
+    if os.path.exists(more_compressed_path) and os.path.getsize(more_compressed_path) > 50 * 1024 * 1024:
+        extreme_compressed_path = f"{os.path.splitext(video_path)[0]}_extreme_compressed.mp4"
+        cmd = f'ffmpeg -i \"{video_path}\" -c:v libx264 -crf 40 -preset faster -vf "scale=-2:240" -r 15 -c:a aac -b:a 48k \"{extreme_compressed_path}\"'
+        subprocess.call(cmd, shell=True)
+
+        if os.path.exists(extreme_compressed_path) and os.path.getsize(extreme_compressed_path) <= 50 * 1024 * 1024:
+            if os.path.exists(compressed_path):
+                os.remove(compressed_path)
+            if os.path.exists(more_compressed_path):
+                os.remove(more_compressed_path)
+            logger.info(f"Видео успешно сжато с экстремальной компрессией: {extreme_compressed_path}")
+            return extreme_compressed_path
+
+    logger.error("Не удалось сжать видео до размера менее 50 МБ")
     return None
 
 
