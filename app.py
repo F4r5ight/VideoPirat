@@ -247,36 +247,56 @@ def download_and_send_video(url, platform, chat_id, status_message_id):
 
         if file_size > max_telegram_size:
             # Если файл слишком большой, пробуем сжать сильнее
-            application.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=status_message_id,
-                text="⏳ Видео слишком большое, применяю дополнительное сжатие..."
+            requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
+                json={
+                    "chat_id": chat_id,
+                    "message_id": status_message_id,
+                    "text": "⏳ Видео слишком большое, применяю дополнительное сжатие..."
+                }
             )
 
             compressed_path = compress_video(video_path)
             if compressed_path:
                 video_path = compressed_path
             else:
-                application.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=status_message_id,
-                    text="❌ Видео слишком большое для отправки в Telegram даже после сжатия (>50MB)"
+                requests.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
+                    json={
+                        "chat_id": chat_id,
+                        "message_id": status_message_id,
+                        "text": "❌ Видео слишком большое для отправки в Telegram даже после сжатия (>50MB)"
+                    }
                 )
                 # Удаляем временные файлы
                 cleanup_video_files(video_path)
                 return
 
-        # Отправляем видео в чат
+        # Отправляем видео в чат используя метод sendVideo
         with open(video_path, 'rb') as video_file:
-            application.bot.send_video(
-                chat_id=chat_id,
-                video=video_file,
-                caption=f"🎬 Видео из {platform.capitalize()}\n🔗 {url}",
-                supports_streaming=True
+            files = {
+                'video': video_file
+            }
+            data = {
+                'chat_id': chat_id,
+                'caption': f"🎬 Видео из {platform.capitalize()}\n🔗 {url}",
+                'supports_streaming': 'true'
+            }
+
+            requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo",
+                files=files,
+                data=data
             )
 
         # Удаляем статусное сообщение
-        application.bot.delete_message(chat_id=chat_id, message_id=status_message_id)
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage",
+            json={
+                "chat_id": chat_id,
+                "message_id": status_message_id
+            }
+        )
 
         # Удаляем временные файлы
         cleanup_video_files(video_path)
@@ -296,14 +316,99 @@ def download_and_send_video(url, platform, chat_id, status_message_id):
             error_text = "❌ Для доступа к этому контенту требуется авторизация."
 
         try:
-            application.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=status_message_id,
-                text=f"{error_text}: {short_error}"
+            requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
+                json={
+                    "chat_id": chat_id,
+                    "message_id": status_message_id,
+                    "text": f"{error_text}: {short_error}"
+                }
             )
         except Exception:
             # Если не удалось отредактировать сообщение, отправляем новое
-            bot.send_message(chat_id=chat_id, text=f"{error_text}: {short_error}")
+            requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": f"{error_text}: {short_error}"
+                }
+            )
+
+        logger.error(f"Ошибка при обработке URL {url}: {e}")
+
+
+def download_and_send_video_no_status(url, platform, chat_id):
+    """Скачивает и отправляет видео без статусного сообщения"""
+    try:
+        # Очищаем старые временные файлы
+        cleanup_temp_files()
+
+        # Скачиваем видео
+        video_path = download_video(url, platform)
+
+        # Проверяем размер файла
+        file_size = os.path.getsize(video_path)
+        max_telegram_size = 50 * 1024 * 1024  # 50 МБ в байтах
+
+        if file_size > max_telegram_size:
+            # Если файл слишком большой, пробуем сжать сильнее
+            compressed_path = compress_video(video_path)
+            if compressed_path:
+                video_path = compressed_path
+            else:
+                requests.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                    json={
+                        "chat_id": chat_id,
+                        "text": "❌ Видео слишком большое для отправки в Telegram даже после сжатия (>50MB)"
+                    }
+                )
+                # Удаляем временные файлы
+                cleanup_video_files(video_path)
+                return
+
+        # Отправляем видео в чат используя метод sendVideo
+        with open(video_path, 'rb') as video_file:
+            files = {
+                'video': video_file
+            }
+            data = {
+                'chat_id': chat_id,
+                'caption': f"🎬 Видео из {platform.capitalize()}\n🔗 {url}",
+                'supports_streaming': 'true'
+            }
+
+            requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo",
+                files=files,
+                data=data
+            )
+
+        # Удаляем временные файлы
+        cleanup_video_files(video_path)
+
+    except Exception as e:
+        # В случае ошибки информируем пользователя
+        error_message = str(e)
+        short_error = error_message[:100] + "..." if len(error_message) > 100 else error_message
+
+        error_text = "❌ Произошла ошибка при скачивании видео"
+
+        if "Unsupported URL" in error_message:
+            error_text = "❌ Не удалось скачать видео: ссылка не поддерживается или контент недоступен."
+        elif "Private video" in error_message or "This video is private" in error_message:
+            error_text = "❌ Это приватное видео, доступ к нему ограничен."
+        elif "Login required" in error_message or "sign in" in error_message.lower():
+            error_text = "❌ Для доступа к этому контенту требуется авторизация."
+
+        # Отправляем сообщение об ошибке
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": chat_id,
+                "text": f"{error_text}: {short_error}"
+            }
+        )
 
         logger.error(f"Ошибка при обработке URL {url}: {e}")
 
@@ -349,12 +454,42 @@ def webhook():
         # Обработка команд
         if text.startswith('/start') or text.startswith('/старт'):
             logger.info(f"Обработка команды /старт от {chat_id}")
-            send_start_message(chat_id)
+            # Используем requests для отправки сообщения синхронно
+            requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": "👋 Привет! Я бот для скачивания видео из соцсетей.\n\n"
+                            "Просто отправь мне ссылку на пост из Instagram, TikTok, Twitter, YouTube или Facebook, "
+                            "и я извлеку видео для тебя.\n\n"
+                            "Для получения справки используй команду /инфо"
+                }
+            )
             return 'OK'
 
         if text.startswith('/help') or text.startswith('/инфо'):
             logger.info(f"Обработка команды /инфо от {chat_id}")
-            send_info_message(chat_id)
+            # Используем requests для отправки сообщения синхронно
+            requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": "📋 <b>Инструкция по использованию бота</b>\n\n"
+                            "1. Скопируйте ссылку на пост с видео из поддерживаемой соцсети\n"
+                            "2. Отправьте эту ссылку мне в сообщении\n"
+                            "3. Дождитесь, пока я скачаю и отправлю вам видео\n\n"
+                            "<b>Поддерживаемые платформы:</b>\n"
+                            "• Instagram (посты и Reels)\n"
+                            "• TikTok\n"
+                            "• Twitter/X\n"
+                            "• YouTube\n"
+                            "• Facebook\n\n"
+                            "<b>Команды бота:</b>\n"
+                            "/старт - запустить бота\n"
+                            "/инфо - показать эту справку",
+                    "parse_mode": "HTML"
+                }
+            )
             return 'OK'
 
         # Обработка URL
@@ -363,26 +498,48 @@ def webhook():
             platform = get_platform(url)
             logger.info(f"Обнаружена ссылка на {platform} от {chat_id}: {url}")
 
-            # Отправляем сообщение о начале обработки
-            status_message = bot.send_message(
-                chat_id=chat_id,
-                text=f"⏳ Скачиваю видео из {platform.capitalize()}..."
+            # Отправляем сообщение о начале обработки с помощью requests
+            response = requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": f"⏳ Скачиваю видео из {platform.capitalize()}..."
+                }
             )
 
+            # Получаем message_id из ответа API
+            status_message_id = None
+            if response.status_code == 200:
+                response_json = response.json()
+                if response_json['ok']:
+                    status_message_id = response_json['result']['message_id']
+
             # Запускаем обработку видео в отдельном потоке
-            thread = threading.Thread(
-                target=download_and_send_video,
-                args=(url, platform, chat_id, status_message.message_id)
-            )
-            thread.daemon = True  # Поток будет завершен при завершении основного процесса
-            thread.start()
+            if status_message_id:
+                thread = threading.Thread(
+                    target=download_and_send_video,
+                    args=(url, platform, chat_id, status_message_id)
+                )
+                thread.daemon = True
+                thread.start()
+            else:
+                # В случае ошибки запускаем без message_id
+                thread = threading.Thread(
+                    target=download_and_send_video_no_status,
+                    args=(url, platform, chat_id)
+                )
+                thread.daemon = True
+                thread.start()
         else:
             # Если сообщение не является командой и не содержит URL
             if not text.startswith('/'):
                 logger.info(f"Отправка информационного сообщения пользователю {chat_id}")
-                bot.send_message(
-                    chat_id=chat_id,
-                    text="Пожалуйста, отправьте ссылку на видео из поддерживаемой соцсети. Для получения справки используйте команду /инфо"
+                requests.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                    json={
+                        "chat_id": chat_id,
+                        "text": "Пожалуйста, отправьте ссылку на видео из поддерживаемой соцсети. Для получения справки используйте команду /инфо"
+                    }
                 )
 
     except Exception as e:
