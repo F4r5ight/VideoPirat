@@ -382,110 +382,158 @@ def compress_video(video_path):
     compressed_path = f"{os.path.splitext(video_path)[0]}_compressed.mp4"
 
     try:
-        probe_cmd = f"ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=,:p=0 \"{video_path}\""
+        probe_cmd = f"ffprobe -v error -select_streams v:0 -show_entries stream=width,height,display_aspect_ratio -of csv=s=,:p=0 \"{video_path}\""
         probe_result = subprocess.check_output(probe_cmd, shell=True, text=True).strip().split(',')
 
         if len(probe_result) >= 2:
             width, height = int(probe_result[0]), int(probe_result[1])
-            logger.info(f"Оригинальное видео: {width}x{height}")
+            aspect_ratio = float(width) / float(height)
 
-            target_height = min(480, height)
+            logger.info(f"Оригинальное видео: {width}x{height}, соотношение сторон: {aspect_ratio:.2f}")
 
-            dar = f"{width}:{height}"
+            if height > width:
+                logger.info("Обнаружено вертикальное видео, применяю специальную обработку для мобильных устройств")
 
-            filter_complex = f"scale='min({target_height}*dar/sar,720)':'min({target_height},720)':force_original_aspect_ratio=decrease,setdar={dar}"
+                target_height = min(720, height)
+                target_width = int(target_height * aspect_ratio)
+                target_width = target_width - (target_width % 2)
 
-            cmd = f'ffmpeg -i "{video_path}" -c:v libx264 -crf 28 -preset faster ' \
-                  f'-vf "{filter_complex}" ' \
-                  f'-r 24 -c:a aac -b:a 96k "{compressed_path}"'
+                filter_complex = f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,setsar=1:1,pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black"
 
-            logger.info(f"Выполняем команду ffmpeg: {cmd}")
-            subprocess.call(cmd, shell=True)
+                cmd = f'ffmpeg -i "{video_path}" -c:v libx264 -crf 26 -preset fast ' \
+                      f'-vf "{filter_complex}" ' \
+                      f'-r 30 -c:a aac -b:a 128k ' \
+                      f'-movflags +faststart -pix_fmt yuv420p "{compressed_path}"'
 
-            if os.path.exists(compressed_path):
-                verify_cmd = f"ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=,:p=0 \"{compressed_path}\""
-                try:
-                    verify_result = subprocess.check_output(verify_cmd, shell=True, text=True).strip().split(',')
-                    if len(verify_result) >= 2:
-                        new_width, new_height = int(verify_result[0]), int(verify_result[1])
-                        logger.info(f"Сжатое видео: {new_width}x{new_height}")
+                logger.info(f"Запуск команды для вертикального видео: {cmd}")
+                subprocess.call(cmd, shell=True)
+            else:
+                logger.info("Обнаружено горизонтальное видео")
 
-                        orig_ratio = width / height
-                        new_ratio = new_width / new_height
-                        ratio_diff = abs(orig_ratio - new_ratio)
+                target_width = min(720, width)
+                target_height = int(target_width / aspect_ratio)
+                target_height = target_height - (target_height % 2)
 
-                        if ratio_diff > 0.05:
-                            logger.warning(
-                                f"Соотношение сторон изменилось: было {orig_ratio:.2f}, стало {new_ratio:.2f}")
+                filter_complex = f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,setsar=1:1,pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black"
 
-                            os.remove(compressed_path)
-                            return alt_compress(video_path)
-                except Exception as e:
-                    logger.error(f"Ошибка при проверке сжатого видео: {e}")
+                cmd = f'ffmpeg -i "{video_path}" -c:v libx264 -crf 26 -preset fast ' \
+                      f'-vf "{filter_complex}" ' \
+                      f'-r 30 -c:a aac -b:a 128k ' \
+                      f'-movflags +faststart -pix_fmt yuv420p "{compressed_path}"'
+
+                logger.info(f"Запуск команды для горизонтального видео: {cmd}")
+                subprocess.call(cmd, shell=True)
         else:
-            logger.warning("Не удалось определить размеры видео, использую альтернативное сжатие")
-            return alt_compress(video_path)
+            logger.warning("Не удалось определить размеры видео, использую безопасный метод сжатия")
+
+            cmd = f'ffmpeg -i "{video_path}" -c:v libx264 -crf 28 -preset fast ' \
+                  f'-vf "scale=-2:540:force_original_aspect_ratio=decrease,pad=720:540:(ow-iw)/2:(oh-ih)/2:black,setsar=1:1" ' \
+                  f'-r 30 -c:a aac -b:a 128k ' \
+                  f'-movflags +faststart -pix_fmt yuv420p "{compressed_path}"'
+
+            logger.info(f"Запуск безопасного метода сжатия: {cmd}")
+            subprocess.call(cmd, shell=True)
     except Exception as e:
         logger.error(f"Ошибка при анализе видео: {e}")
-        return alt_compress(video_path)
+
+        cmd = f'ffmpeg -i "{video_path}" -c:v libx264 -crf 28 -preset fast ' \
+              f'-vf "scale=-2:540:force_original_aspect_ratio=decrease,pad=720:540:(ow-iw)/2:(oh-ih)/2:black,setsar=1:1" ' \
+              f'-r 30 -c:a aac -b:a 128k ' \
+              f'-movflags +faststart -pix_fmt yuv420p "{compressed_path}"'
+
+        logger.info(f"Запуск запасного метода сжатия: {cmd}")
+        subprocess.call(cmd, shell=True)
 
     if os.path.exists(compressed_path) and os.path.getsize(compressed_path) <= 50 * 1024 * 1024:
         logger.info(f"Видео успешно сжато: {compressed_path}")
         return compressed_path
 
-    logger.info("Видео всё ещё слишком большое, применяю дополнительное сжатие")
-    os.remove(compressed_path)
-    return alt_compress(video_path, stronger=True)
+    more_compressed_path = f"{os.path.splitext(video_path)[0]}_more_compressed.mp4"
 
+    try:
+        probe_cmd = f"ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=,:p=0 \"{video_path}\""
+        probe_result = subprocess.check_output(probe_cmd, shell=True, text=True).strip().split(',')
 
-def alt_compress(video_path, stronger=False):
-    if stronger:
-        compressed_path = f"{os.path.splitext(video_path)[0]}_stronger_compressed.mp4"
-    else:
-        compressed_path = f"{os.path.splitext(video_path)[0]}_alt_compressed.mp4"
+        if len(probe_result) >= 2:
+            width, height = int(probe_result[0]), int(probe_result[1])
+            aspect_ratio = float(width) / float(height)
 
-    target_height = 360 if stronger else 480
+            if height > width:
+                target_height = min(480, height)
+                target_width = int(target_height * aspect_ratio)
+                target_width = target_width - (target_width % 2)
 
-    filter_complex = f"scale=720:-2,pad=720:{target_height}:(ow-iw)/2:(oh-ih)/2:black"
+                filter_complex = f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,setsar=1:1,pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black"
+            else:
+                target_width = min(480, width)
+                target_height = int(target_width / aspect_ratio)
+                target_height = target_height - (target_height % 2)
 
-    crf = 32 if stronger else 28
-    bitrate = "64k" if stronger else "96k"
-    fps = 20 if stronger else 24
+                filter_complex = f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,setsar=1:1,pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black"
 
-    cmd = f'ffmpeg -i "{video_path}" -c:v libx264 -crf {crf} -preset faster ' \
-          f'-vf "{filter_complex}" ' \
-          f'-r {fps} -c:a aac -b:a {bitrate} "{compressed_path}"'
+            logger.info(f"Применяю дополнительное сжатие с размерами {target_width}x{target_height}")
 
-    logger.info(f"Запуск альтернативного метода сжатия: {cmd}")
+            cmd = f'ffmpeg -i "{video_path}" -c:v libx264 -crf 32 -preset fast ' \
+                  f'-vf "{filter_complex}" ' \
+                  f'-r 24 -c:a aac -b:a 96k ' \
+                  f'-movflags +faststart -pix_fmt yuv420p "{more_compressed_path}"'
+
+            logger.info(f"Запуск команды для дополнительного сжатия: {cmd}")
+            subprocess.call(cmd, shell=True)
+        else:
+            logger.warning("Не удалось определить размеры для дополнительного сжатия")
+
+            cmd = f'ffmpeg -i "{video_path}" -c:v libx264 -crf 32 -preset fast ' \
+                  f'-vf "scale=-2:360:force_original_aspect_ratio=decrease,pad=480:360:(ow-iw)/2:(oh-ih)/2:black,setsar=1:1" ' \
+                  f'-r 24 -c:a aac -b:a 96k ' \
+                  f'-movflags +faststart -pix_fmt yuv420p "{more_compressed_path}"'
+
+            logger.info(f"Запуск универсального метода дополнительного сжатия: {cmd}")
+            subprocess.call(cmd, shell=True)
+    except Exception as e:
+        logger.error(f"Ошибка при дополнительном сжатии: {e}")
+
+        cmd = f'ffmpeg -i "{video_path}" -c:v libx264 -crf 32 -preset fast ' \
+              f'-vf "scale=-2:360:force_original_aspect_ratio=decrease,pad=480:360:(ow-iw)/2:(oh-ih)/2:black,setsar=1:1" ' \
+              f'-r 24 -c:a aac -b:a 96k ' \
+              f'-movflags +faststart -pix_fmt yuv420p "{more_compressed_path}"'
+
+        logger.info(f"Запуск запасного метода дополнительного сжатия: {cmd}")
+        subprocess.call(cmd, shell=True)
+
+    if os.path.exists(more_compressed_path) and os.path.getsize(more_compressed_path) <= 50 * 1024 * 1024:
+        if os.path.exists(compressed_path):
+            os.remove(compressed_path)
+        logger.info(f"Видео успешно сжато с дополнительной компрессией: {more_compressed_path}")
+        return more_compressed_path
+
+    extreme_compressed_path = f"{os.path.splitext(video_path)[0]}_extreme_compressed.mp4"
+
+    cmd = f'ffmpeg -i "{video_path}" -c:v libx264 -crf 40 -preset fast ' \
+          f'-vf "scale=-2:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2:black,setsar=1:1" ' \
+          f'-r 15 -c:a aac -b:a 48k ' \
+          f'-movflags +faststart -pix_fmt yuv420p "{extreme_compressed_path}"'
+
+    logger.info(f"Запуск экстремального метода сжатия: {cmd}")
     subprocess.call(cmd, shell=True)
 
-    if os.path.exists(compressed_path) and os.path.getsize(compressed_path) <= 50 * 1024 * 1024:
-        logger.info(f"Видео успешно сжато альтернативным методом: {compressed_path}")
-        return compressed_path
-
-    if not stronger and os.path.exists(compressed_path) and os.path.getsize(compressed_path) > 50 * 1024 * 1024:
-        os.remove(compressed_path)
-        logger.info("Применяю экстремальное сжатие")
-        return alt_compress(video_path, stronger=True)
-
-    if os.path.exists(compressed_path) and os.path.getsize(compressed_path) > 50 * 1024 * 1024:
-        os.remove(compressed_path)
-
-        extreme_path = f"{os.path.splitext(video_path)[0]}_extreme_compressed.mp4"
-        extreme_cmd = f'ffmpeg -i "{video_path}" -c:v libx264 -crf 40 -preset faster ' \
-                      f'-vf "scale=320:-2,pad=320:240:(ow-iw)/2:(oh-ih)/2:black" ' \
-                      f'-r 15 -c:a aac -b:a 48k "{extreme_path}"'
-
-        logger.info(f"Последняя попытка сжатия: {extreme_cmd}")
-        subprocess.call(extreme_cmd, shell=True)
-
-        if os.path.exists(extreme_path) and os.path.getsize(extreme_path) <= 50 * 1024 * 1024:
-            logger.info(f"Видео успешно сжато экстремальным методом: {extreme_path}")
-            return extreme_path
-        elif os.path.exists(extreme_path):
-            os.remove(extreme_path)
+    if os.path.exists(extreme_compressed_path) and os.path.getsize(extreme_compressed_path) <= 50 * 1024 * 1024:
+        if os.path.exists(compressed_path):
+            os.remove(compressed_path)
+        if os.path.exists(more_compressed_path):
+            os.remove(more_compressed_path)
+        logger.info(f"Видео успешно сжато с экстремальной компрессией: {extreme_compressed_path}")
+        return extreme_compressed_path
 
     logger.error("Не удалось сжать видео до размера менее 50 МБ")
+
+    if os.path.exists(extreme_compressed_path):
+        os.remove(extreme_compressed_path)
+    if os.path.exists(more_compressed_path):
+        os.remove(more_compressed_path)
+    if os.path.exists(compressed_path):
+        os.remove(compressed_path)
+
     return None
 
 
