@@ -49,7 +49,7 @@
 
 Для быстрого развертывания нажмите кнопку ниже:
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https%3A%2F%2Fgithub.com%2FF4r5ight%2FVideoPirat)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/F4r5ight/VideoPirat)
 
 Не забудьте установить переменную окружения `BOT_TOKEN` в настройках Railway.
 
