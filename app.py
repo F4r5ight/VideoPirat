@@ -249,6 +249,7 @@ def download_video(url, platform):
                         'outtmpl': f'temp/{shortcode}.%(ext)s',
                         'quiet': True,
                         'no_warnings': True,
+                        'cookiefile': 'instagram_cookies.txt',  # Путь к файлу с cookies
                         'http_headers': {
                             'User-Agent': random.choice(user_agents),
                             'Accept-Language': 'en-US,en;q=0.9',
