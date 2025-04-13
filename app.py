@@ -144,6 +144,74 @@ def send_info_message(chat_id):
         logger.error(f"Ошибка при отправке справочного сообщения: {e}")
 
 
+def download_instagram_via_snapinsta(url, shortcode):
+    try:
+        logger.info(f"Попытка скачивания через Snapinsta API: {url}")
+
+        # Формируем данные для запроса
+        data = {
+            "url": url,
+            "lang_code": "en"
+        }
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Origin": "https://snapinsta.app",
+            "Referer": "https://snapinsta.app/",
+        }
+
+        # Отправляем POST запрос
+        response = requests.post(
+            "https://snapinsta.app/action.php",
+            data=data,
+            headers=headers,
+            timeout=30
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Ошибка при запросе к Snapinsta API: {response.status_code}")
+            return None
+
+        # Парсим HTML-ответ для извлечения ссылки на видео
+        html_content = response.text
+
+        # Ищем URL видео в ответе
+        # Обычно URL находится внутри тега <a> с атрибутом download
+        video_url_match = re.search(r'href="(https?://[^"]+\.mp4[^"]*)"', html_content)
+
+        if not video_url_match:
+            logger.error("Не удалось найти URL видео в ответе Snapinsta")
+            return None
+
+        video_url = video_url_match.group(1)
+
+        # Скачиваем видео по полученной ссылке
+        video_response = requests.get(video_url, stream=True, timeout=60)
+
+        if video_response.status_code != 200:
+            logger.error(f"Ошибка при скачивании видео: {video_response.status_code}")
+            return None
+
+        # Сохраняем видео
+        video_path = f"temp/{shortcode}.mp4"
+
+        with open(video_path, 'wb') as f:
+            for chunk in video_response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+            logger.info(f"Видео успешно скачано через Snapinsta API: {video_path}")
+            return video_path
+        else:
+            logger.error("Файл видео пустой или не существует после скачивания")
+            return None
+
+    except Exception as e:
+        logger.error(f"Ошибка при скачивании через Snapinsta API: {e}")
+        return None
+
+
 def extract_url(text):
     url_pattern = r'https?://\S+'
     urls = re.findall(url_pattern, text)
@@ -337,9 +405,17 @@ def download_video(url, platform):
                             return video_path
 
                     raise ValueError("Не удалось найти скачанное видео через yt-dlp")
-
                 except Exception as ytdl_err:
                     logger.error(f"Не удалось скачать через yt-dlp: {ytdl_err}")
+
+            # Если и yt-dlp не сработал, пробуем Snapinsta API
+            if not video_path:
+                logger.info("Попытка скачать через Snapinsta API")
+                video_path = download_instagram_via_snapinsta(url, shortcode)
+
+                if video_path:
+                    return video_path
+                else:
                     raise ValueError(f"Не удалось скачать видео с Instagram ни одним из методов")
 
             return video_path
@@ -595,6 +671,7 @@ def compress_video(video_path):
 
     return None
 
+
 def cleanup_video_files(video_path):
     temp_files = [
         video_path,
@@ -606,6 +683,7 @@ def cleanup_video_files(video_path):
     for file in temp_files:
         if os.path.exists(file):
             os.remove(file)
+
 
 def download_and_send_video(url, platform, chat_id, status_message_id):
     try:
@@ -700,6 +778,7 @@ def download_and_send_video(url, platform, chat_id, status_message_id):
 
         logger.error(f"Ошибка при обработке URL {url}: {e}")
 
+
 def download_and_send_video_no_status(url, platform, chat_id):
     try:
         cleanup_temp_files()
@@ -765,6 +844,7 @@ def download_and_send_video_no_status(url, platform, chat_id):
 
         logger.error(f"Ошибка при обработке URL {url}: {e}")
 
+
 async def set_webhook_async(webhook_url):
     try:
         logger.info(f"Удаляем текущий вебхук...")
@@ -778,6 +858,7 @@ async def set_webhook_async(webhook_url):
     except Exception as e:
         logger.error(f"Ошибка в асинхронной функции настройки вебхука: {e}")
         raise
+
 
 @app.route('/' + BOT_TOKEN, methods=['POST'])
 def webhook():
@@ -884,6 +965,7 @@ def webhook():
 
     return 'OK'
 
+
 @app.route('/')
 def index():
     return 'Бот работает!'
@@ -938,6 +1020,7 @@ def remove_webhook():
     except Exception as e:
         logger.error(f"Ошибка при удалении вебхука: {e}")
         return f'Ошибка при удалении webhook: {e}'
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
