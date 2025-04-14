@@ -157,13 +157,13 @@ def download_instagram_via_snapinsta(url, shortcode):
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Content-Type": "application/x-www-form-urlencoded",
-            "Origin": "https://snapinsta.app",
-            "Referer": "https://snapinsta.app/",
+            "Origin": "https://snapinsta.io",
+            "Referer": "https://snapinsta.io/",
         }
 
         # Отправляем POST запрос
         response = requests.post(
-            "https://snapinsta.app/action.php",
+            "https://snapinsta.io/action.php",
             data=data,
             headers=headers,
             timeout=30
