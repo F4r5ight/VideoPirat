@@ -144,6 +144,200 @@ def send_info_message(chat_id):
         logger.error(f"Ошибка при отправке справочного сообщения: {e}")
 
 
+def download_instagram_via_ssstik(url, shortcode):
+    try:
+        logger.info(f"Попытка скачивания через SST-dl API: {url}")
+
+        session = requests.Session()
+        response = session.get("https://ssstik.io/ru")
+        html = response.text
+
+        # Извлекаем tt_csrf_token
+        csrf_token = re.search(r'name="tt_csrf_token" value="([^"]+)"', html).group(1)
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "*/*",
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "Origin": "https://ssstik.io",
+            "Referer": "https://ssstik.io/ru",
+        }
+
+        data = {
+            "id": url,
+            "locale": "ru",
+            "tt_csrf_token": csrf_token,
+        }
+
+        download_response = session.post("https://ssstik.io/abc?url=instagram", headers=headers, data=data)
+
+        if download_response.status_code != 200:
+            logger.error(f"Ошибка при запросе к SST-dl API: {download_response.status_code}")
+            return None
+
+        # Ищем ссылку для скачивания
+        download_url = re.search(r'href="(https://[^"]+\.mp4[^"]*)"', download_response.text)
+
+        if not download_url:
+            logger.error("Не удалось найти URL видео в ответе SST-dl")
+            return None
+
+        video_url = download_url.group(1)
+
+        # Скачиваем видео
+        video_response = requests.get(video_url, stream=True, timeout=60)
+
+        if video_response.status_code != 200:
+            logger.error(f"Ошибка при скачивании видео: {video_response.status_code}")
+            return None
+
+        video_path = f"temp/{shortcode}.mp4"
+
+        with open(video_path, 'wb') as f:
+            for chunk in video_response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+            logger.info(f"Видео успешно скачано через SST-dl API: {video_path}")
+            return video_path
+        else:
+            logger.error("Файл видео пустой или не существует после скачивания")
+            return None
+
+    except Exception as e:
+        logger.error(f"Ошибка при скачивании через SST-dl API: {e}")
+        return None
+
+
+def download_instagram_via_savefrom(url, shortcode):
+    try:
+        logger.info(f"Попытка скачивания через SaveFrom API: {url}")
+
+        api_url = "https://worker-downloads.sf-tools.com/download/instagram"
+        params = {"url": url}
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Referer": "https://ru.savefrom.net/",
+            "Origin": "https://ru.savefrom.net"
+        }
+
+        response = requests.get(api_url, params=params, headers=headers, timeout=30)
+
+        if response.status_code != 200:
+            logger.error(f"Ошибка при запросе к SaveFrom API: {response.status_code}")
+            return None
+
+        data = response.json()
+
+        if "url" not in data:
+            logger.error("URL видео не найден в ответе SaveFrom")
+            return None
+
+        video_url = data["url"]
+
+        # Скачиваем видео
+        video_response = requests.get(video_url, stream=True, timeout=60)
+
+        if video_response.status_code != 200:
+            logger.error(f"Ошибка при скачивании видео: {video_response.status_code}")
+            return None
+
+        video_path = f"temp/{shortcode}.mp4"
+
+        with open(video_path, 'wb') as f:
+            for chunk in video_response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+            logger.info(f"Видео успешно скачано через SaveFrom API: {video_path}")
+            return video_path
+        else:
+            logger.error("Файл видео пустой или не существует после скачивания")
+            return None
+
+    except Exception as e:
+        logger.error(f"Ошибка при скачивании через SaveFrom API: {e}")
+        return None
+
+
+def download_instagram_via_instagramsave(url, shortcode):
+    try:
+        logger.info(f"Попытка скачивания через Instagramsave API: {url}")
+
+        session = requests.Session()
+        main_page = session.get("https://instagramsave.com/")
+
+        # Получаем token из главной страницы
+        token_pattern = r'name="_token" value="([^"]+)"'
+        token_match = re.search(token_pattern, main_page.text)
+
+        if not token_match:
+            logger.error("Не удалось получить токен с Instagramsave")
+            return None
+
+        token = token_match.group(1)
+
+        # Формируем данные для запроса
+        data = {
+            "_token": token,
+            "link": url,
+        }
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-Requested-With": "XMLHttpRequest",
+            "Origin": "https://instagramsave.com",
+            "Referer": "https://instagramsave.com/"
+        }
+
+        # Отправляем запрос
+        response = session.post(
+            "https://instagramsave.com/system/action.php",
+            data=data,
+            headers=headers,
+            timeout=30
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Ошибка при запросе к Instagramsave API: {response.status_code}")
+            return None
+
+        response_data = response.json()
+
+        if "videourl" not in response_data:
+            logger.error("URL видео не найден в ответе Instagramsave")
+            return None
+
+        video_url = response_data["videourl"]
+
+        # Скачиваем видео
+        video_response = session.get(video_url, stream=True, timeout=60)
+
+        if video_response.status_code != 200:
+            logger.error(f"Ошибка при скачивании видео: {video_response.status_code}")
+            return None
+
+        video_path = f"temp/{shortcode}.mp4"
+
+        with open(video_path, 'wb') as f:
+            for chunk in video_response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+            logger.info(f"Видео успешно скачано через Instagramsave API: {video_path}")
+            return video_path
+        else:
+            logger.error("Файл видео пустой или не существует после скачивания")
+            return None
+
+    except Exception as e:
+        logger.error(f"Ошибка при скачивании через Instagramsave API: {e}")
+        return None
+
 def download_instagram_via_snapinsta(url, shortcode):
     try:
         logger.info(f"Попытка скачивания через Snapinsta API: {url}")
@@ -413,10 +607,22 @@ def download_video(url, platform):
                 logger.info("Попытка скачать через Snapinsta API")
                 video_path = download_instagram_via_snapinsta(url, shortcode)
 
-                if video_path:
-                    return video_path
-                else:
-                    raise ValueError(f"Не удалось скачать видео с Instagram ни одним из методов")
+            if not video_path:
+                logger.info("Попытка скачать через SST-dl API")
+                video_path = download_instagram_via_ssstik(url, shortcode)
+
+            if not video_path:
+                logger.info("Попытка скачать через SaveFrom API")
+                video_path = download_instagram_via_savefrom(url, shortcode)
+
+            if not video_path:
+                logger.info("Попытка скачать через Instagramsave API")
+                video_path = download_instagram_via_instagramsave(url, shortcode)
+
+            if video_path:
+                return video_path
+            else:
+                raise ValueError(f"Не удалось скачать видео с Instagram ни одним из методов")
 
             return video_path
 
