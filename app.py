@@ -32,7 +32,7 @@ app = Flask(__name__)
 os.makedirs('temp', exist_ok=True)
 
 SUPPORTED_PLATFORMS = {
-    'instagram': r'https?://(www\.)?(instagram\.com|instagr\.am)/(?:p|reel)/[^/]+',
+#    'instagram': r'https?://(www\.)?(instagram\.com|instagr\.am)/(?:p|reel)/[^/]+',
     'tiktok': r'https?://(www\.)?(tiktok\.com)/(@[^/]+)/video/\d+',
     'twitter': r'https?://(www\.)?(twitter\.com|x\.com)/[^/]+/status/\d+',
     'youtube': r'https?://(www\.)?(youtube\.com/watch\?v=|youtu\.be/)[^&\s]+',
@@ -103,7 +103,7 @@ def send_start_message(chat_id):
         payload = {
             "chat_id": chat_id,
             "text": "👋 Привет! Я бот для скачивания видео из соцсетей.\n\n"
-                    "Просто отправь мне ссылку на пост из Instagram, TikTok, Twitter, YouTube, Facebook или LinkedIn, "
+                    "Просто отправь мне ссылку на пост из TikTok, Twitter, YouTube, Facebook или LinkedIn, "
                     "и я извлеку видео для тебя.\n\n"
                     "Для получения справки используй команду /инфо"
         }
@@ -128,7 +128,6 @@ def send_info_message(chat_id):
                  "2. Отправьте эту ссылку мне в сообщении\n"
                  "3. Дождитесь, пока я скачаю и отправлю вам видео\n\n"
                  "<b>Поддерживаемые платформы:</b>\n"
-                 "• Instagram (посты и Reels)\n"
                  "• TikTok\n"
                  "• Twitter/X\n"
                  "• YouTube\n"
