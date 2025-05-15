@@ -3,5 +3,5 @@ flask
 python-dotenv
 requests
 browser-cookie3
-yt-dlp>=2023.3.4
+yt-dlp
 instaloader>=4.10
