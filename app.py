@@ -32,9 +32,9 @@ app = Flask(__name__)
 os.makedirs('temp', exist_ok=True)
 
 SUPPORTED_PLATFORMS = {
-#    'instagram': r'https?://(www\.)?(instagram\.com|instagr\.am)/(?:p|reel)/[^/]+',
+    #    'instagram': r'https?://(www\.)?(instagram\.com|instagr\.am)/(?:p|reel)/[^/]+',
     'tiktok': r'https?://(www\.)?(tiktok\.com)/(@[^/]+)/video/\d+',
-    'twitter': r'https?://(www\.)?(twitter\.com|x\.com)/[^/]+/status/\d+',
+    'twitter': r'https?://(www\.)?(twitter\.com|x\.com)/[^/]+/status/\d+(\?[^/]*)?',
     'youtube': r'https?://(www\.)?(youtube\.com/watch\?v=|youtu\.be/)[^&\s]+',
     'facebook': r'https?://(www\.)?(facebook\.com|fb\.watch)/[^/]+(/videos/|/watch/\?v=)\d+',
     'linkedin': r'https?://(www\.)?(linkedin\.com)/posts/[^/]+(?:-[^/]+)*-(?:activity-|ugcPost-)\d+',
@@ -337,6 +337,7 @@ def download_instagram_via_instagramsave(url, shortcode):
         logger.error(f"Ошибка при скачивании через Instagramsave API: {e}")
         return None
 
+
 def download_instagram_via_snapinsta(url, shortcode):
     try:
         logger.info(f"Попытка скачивания через Snapinsta API: {url}")
@@ -402,6 +403,152 @@ def download_instagram_via_snapinsta(url, shortcode):
 
     except Exception as e:
         logger.error(f"Ошибка при скачивании через Snapinsta API: {e}")
+        return None
+
+
+def download_twitter_via_twdown(url, tweet_id):
+    try:
+        logger.info(f"Попытка скачивания через TwDown API: {url}")
+
+        session = requests.Session()
+
+        # Получаем главную страницу для токена
+        main_page = session.get("https://twdown.net/", headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        })
+
+        # Формируем данные для запроса
+        data = {
+            "URL": url
+        }
+
+        # Отправляем запрос
+        response = session.post(
+            "https://twdown.net/download.php",
+            data=data,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": "https://twdown.net",
+                "Referer": "https://twdown.net/"
+            },
+            timeout=30
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Ошибка при запросе к TwDown: {response.status_code}")
+            return None
+
+        # Ищем ссылки на видео в ответе
+        html_content = response.text
+        video_url_match = re.search(r'href="(https?://video\.twimg\.com/[^"]+\.mp4)"', html_content)
+
+        if not video_url_match:
+            logger.error("URL видео не найден в ответе TwDown")
+            return None
+
+        video_url = video_url_match.group(1)
+
+        # Скачиваем видео
+        video_path = f"temp/{tweet_id}.mp4"
+
+        video_response = session.get(video_url, stream=True, timeout=60)
+
+        if video_response.status_code != 200:
+            logger.error(f"Ошибка при скачивании видео: {video_response.status_code}")
+            return None
+
+        with open(video_path, 'wb') as f:
+            for chunk in video_response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+            logger.info(f"Видео успешно скачано через TwDown API: {video_path}")
+            return video_path
+        else:
+            logger.error("Файл видео пустой или не существует после скачивания")
+            return None
+
+    except Exception as e:
+        logger.error(f"Ошибка при скачивании через TwDown API: {e}")
+        return None
+
+
+def download_twitter_via_savetweetvid(url, tweet_id):
+    try:
+        logger.info(f"Попытка скачивания через SaveTweetVid API: {url}")
+
+        session = requests.Session()
+
+        # Получаем главную страницу для подготовки запроса
+        main_page = session.get("https://www.savetweetvid.com/", headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        })
+
+        # Формируем данные для запроса
+        data = {
+            "twitter": url
+        }
+
+        # Отправляем запрос
+        response = session.post(
+            "https://www.savetweetvid.com/downloader",
+            data=data,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": "https://www.savetweetvid.com",
+                "Referer": "https://www.savetweetvid.com/"
+            },
+            timeout=30
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Ошибка при запросе к SaveTweetVid: {response.status_code}")
+            return None
+
+        # Ищем ссылки на видео в ответе (высокое качество)
+        html_content = response.text
+        video_url_match = re.search(r'href="([^"]+)" download="[^"]*" class="button">High Quality</a>', html_content)
+
+        if not video_url_match:
+            # Пробуем найти ссылку на видео любого качества
+            video_url_match = re.search(r'href="([^"]+)" download="[^"]*" class="button"', html_content)
+
+        if not video_url_match:
+            logger.error("URL видео не найден в ответе SaveTweetVid")
+            return None
+
+        video_url = video_url_match.group(1)
+
+        # Скачиваем видео
+        video_path = f"temp/{tweet_id}.mp4"
+
+        video_response = session.get(video_url, stream=True, timeout=60)
+
+        if video_response.status_code != 200:
+            logger.error(f"Ошибка при скачивании видео: {video_response.status_code}")
+            return None
+
+        with open(video_path, 'wb') as f:
+            for chunk in video_response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
+            logger.info(f"Видео успешно скачано через SaveTweetVid API: {video_path}")
+            return video_path
+        else:
+            logger.error("Файл видео пустой или не существует после скачивания")
+            return None
+
+    except Exception as e:
+        logger.error(f"Ошибка при скачивании через SaveTweetVid API: {e}")
         return None
 
 
@@ -656,13 +803,82 @@ def download_video(url, platform):
                 ydl_opts['retries'] = 10
                 ydl_opts['fragment_retries'] = 10
                 ydl_opts['socket_timeout'] = 120
-            elif platform == 'twitter' or platform == 'x':
-                ydl_opts['http_headers'] = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    'Referer': 'https://twitter.com/'
+            elif platform == 'twitter':
+                logger.info(f"Используем yt-dlp для скачивания видео с twitter")
+
+                # Извлекаем ID твита для использования в качестве имени файла
+                match = re.search(r'twitter\.com/[^/]+/status/(\d+)', url) or re.search(r'x\.com/[^/]+/status/(\d+)',
+                                                                                        url)
+                if not match:
+                    raise ValueError("Не удалось извлечь ID твита из URL")
+
+                tweet_id = match.group(1)
+                video_path = None
+
+                # Обновленные заголовки для Twitter
+                twitter_headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Accept": "*/*",
+                    "Referer": "https://twitter.com/",
+                    "x-twitter-active-user": "yes",
+                    "x-twitter-client-language": "en"
                 }
+
+                ydl_opts = {
+                    'format': 'best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best',
+                    'outtmpl': f'temp/{tweet_id}.%(ext)s',
+                    'restrictfilenames': True,
+                    'noplaylist': True,
+                    'quiet': True,
+                    'no_warnings': True,
+                    'http_headers': twitter_headers,
+                    'socket_timeout': 60,
+                    'retries': 5,
+                    'fragment_retries': 10
+                }
+
+                try:
+                    logger.info("Попытка скачивания через yt-dlp")
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download([url])
+
+                    for ext in ['mp4', 'mkv', 'webm']:
+                        video_path = f'temp/{tweet_id}.{ext}'
+                        if os.path.exists(video_path):
+                            logger.info(f"Видео Twitter успешно скачано через yt-dlp: {video_path}")
+
+                            if not video_path.endswith('.mp4'):
+                                new_path = f"temp/{tweet_id}.mp4"
+                                cmd = f"ffmpeg -i \"{video_path}\" -c:v libx264 -crf 23 -preset medium -c:a aac -b:a 128k \"{new_path}\""
+                                subprocess.call(cmd, shell=True)
+
+                                if os.path.exists(new_path):
+                                    if os.path.exists(video_path):
+                                        os.remove(video_path)
+                                    video_path = new_path
+
+                            return video_path
+
+                    logger.warning("Не удалось найти скачанное видео через yt-dlp")
+                except Exception as e:
+                    logger.error(f"Ошибка при скачивании через yt-dlp: {e}")
+
+                # Если yt-dlp не сработал, пробуем TwDown API
+                if not video_path:
+                    logger.info("Попытка скачать через TwDown API")
+                    video_path = download_twitter_via_twdown(url, tweet_id)
+
+                # Если и TwDown не сработал, пробуем SaveTweetVid API
+                if not video_path:
+                    logger.info("Попытка скачать через SaveTweetVid API")
+                    video_path = download_twitter_via_savetweetvid(url, tweet_id)
+
+                if video_path:
+                    return video_path
+                else:
+                    raise ValueError(f"Не удалось скачать видео с Twitter ни одним из методов")
+
             elif platform == 'facebook':
                 ydl_opts['http_headers'] = {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36',
@@ -1089,7 +1305,7 @@ def webhook():
                 json={
                     "chat_id": chat_id,
                     "text": "👋 Привет! Я бот для скачивания видео из соцсетей.\n\n"
-                            "Просто отправь мне ссылку на пост из Instagram, TikTok, Twitter, YouTube или Facebook или LinkedIn, "
+                            "Просто отправь мне ссылку на пост из TikTok, Twitter, YouTube или Facebook или LinkedIn, "
                             "и я извлеку видео для тебя.\n\n"
                             "Для получения справки используй команду /инфо"
                 }
@@ -1107,7 +1323,6 @@ def webhook():
                             "2. Отправьте эту ссылку мне в сообщении\n"
                             "3. Дождитесь, пока я скачаю и отправлю вам видео\n\n"
                             "<b>Поддерживаемые платформы:</b>\n"
-                            "• Instagram (посты и Reels)\n"
                             "• TikTok\n"
                             "• Twitter/X\n"
                             "• YouTube\n"
