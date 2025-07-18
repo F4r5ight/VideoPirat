@@ -13,7 +13,6 @@ import yt_dlp
 import requests
 from telegram import Bot
 from telegram.ext import ApplicationBuilder
-import instaloader
 import glob
 import shutil
 
@@ -33,7 +32,7 @@ os.makedirs('temp', exist_ok=True)
 
 SUPPORTED_PLATFORMS = {
     #    'instagram': r'https?://(www\.)?(instagram\.com|instagr\.am)/(?:p|reel)/[^/]+',
-    'tiktok': r'https?://(www\.)?(tiktok\.com)/(@[^/]+)/video/\d+',
+    'tiktok': r'https?://(www\.)?(tiktok\.com|vm\.tiktok\.com)/(@[^/]+/video/\d+|[A-Za-z0-9]+/?)',
     'twitter': r'https?://(www\.)?(twitter\.com|x\.com)/[^/]+/status/\d+(\?[^/]*)?',
     'youtube': r'https?://(www\.)?(youtube\.com/watch\?v=|youtu\.be/)[^&\s]+',
     'facebook': r'https?://(www\.)?(facebook\.com|fb\.watch)/[^/]+(/videos/|/watch/\?v=)\d+',
